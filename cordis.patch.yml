@@ -1,0 +1,12 @@
+# dsh-composer-markdown bundle patch
+#
+# Inserts this plugin's loader row so the bundle owns one entry (and thus
+# appears in Settings → Plugins, toggleable there). The host half is a no-op
+# carrier; every behavior lives in the browser client (client.js):
+# markdown list continuation, inline-code styling via Lexical's IS_CODE
+# text-format bit, code-fence auto-closing, and in-fence Enter protection.
+# The submitted draft text is never altered — all enhancements are
+# edit-state visuals and key gestures only.
+- insert:
+    - id: composer-markdown
+      name: 'dsh-composer-markdown'
