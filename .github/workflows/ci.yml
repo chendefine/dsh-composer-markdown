@@ -12,6 +12,9 @@ jobs:
   check:
     runs-on: ubuntu-latest
     strategy:
+      # report every node leg's result independently instead of cancelling
+      # the rest when one fails
+      fail-fast: false
       matrix:
         # The package declares engines ">=18" and is zero-dependency, so the
         # matrix covers the whole declared range (the plugin itself runs in
@@ -39,6 +42,9 @@ jobs:
 
       - name: Verify package contents
         run: |
+          # npm pack does NOT create --pack-destination; it aborts with ENOENT
+          # when the directory is missing (run #1 failed exactly there)
+          mkdir -p /tmp/dsh-composer-markdown-pack
           npm pack --pack-destination /tmp/dsh-composer-markdown-pack
           tar -tzf /tmp/dsh-composer-markdown-pack/*.tgz > /tmp/pack-list.txt
           grep -q '^package/index.js$' /tmp/pack-list.txt || (echo 'index.js missing from package' && exit 1)
