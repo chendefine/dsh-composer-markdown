@@ -518,43 +518,44 @@ if (I) {
   console.log('· planListMarkerDelete')
   {
     const md = I.planListMarkerDelete
-    eq(md(['1. abc'], { index: 0, offset: 3 }, 'Backspace'),
-      { index: 0, start: 0, prefix: '1. ' },
-      'Backspace right after `1. ` deletes the whole marker')
-    eq(md(['- abc'], { index: 0, offset: 2 }, 'Backspace'),
-      { index: 0, start: 0, prefix: '- ' },
-      'Backspace right after `- ` deletes the whole marker')
-    eq(md(['* abc'], { index: 0, offset: 2 }, 'Backspace'),
-      { index: 0, start: 0, prefix: '* ' },
-      'the `*` bullet marker is atomic too')
     eq(md(['1. abc'], { index: 0, offset: 0 }, 'Delete'),
       { index: 0, start: 0, prefix: '1. ' },
       'Delete right before the marker eats it forward as one unit')
-    eq(md(['1. '], { index: 0, offset: 3 }, 'Backspace'),
+    eq(md(['- abc'], { index: 0, offset: 0 }, 'Delete'),
+      { index: 0, start: 0, prefix: '- ' },
+      'the bullet atom dies whole under forward Delete too')
+    eq(md(['  1. abc'], { index: 0, offset: 0 }, 'Delete'),
+      { index: 0, start: 0, prefix: '  1. ' },
+      'v2.8: the indent is part of the atom — Delete at the line head removes indent+marker')
+    eq(md(['    - deep'], { index: 0, offset: 0 }, 'Delete'),
+      { index: 0, start: 0, prefix: '    - ' },
+      'a nested bullet atom (any indent) deletes whole as well')
+    eq(md(['1. '], { index: 0, offset: 0 }, 'Delete'),
       { index: 0, start: 0, prefix: '1. ' },
       'a bare prefix (empty item) deletes whole as well')
-    eq(md(['  1. abc'], { index: 0, offset: 5 }, 'Backspace'),
-      { index: 0, start: 2, prefix: '1. ' },
-      'the indent is NOT part of the atomic unit')
-    eq(md(['hello\n- item'], { index: 0, offset: 8 }, 'Backspace'),
+    eq(md(['hello\n- item'], { index: 0, offset: 6 }, 'Delete'),
       { index: 0, start: 6, prefix: '- ' },
-      'soft-line list markers are atomic at their flat offset')
-    eq(md(['1. abc'], { index: 0, offset: 2 }, 'Backspace'), null,
-      'caret INSIDE the marker (after the dot): native delete proceeds')
+      'soft-line list atoms are atomic at their flat offset')
+    eq(md(['1. abc'], { index: 0, offset: 3 }, 'Backspace'), null,
+      'Backspace right after the marker is the LEVEL ladder\'s now (v2.8), not the atomic delete')
+    eq(md(['- abc'], { index: 0, offset: 2 }, 'Backspace'), null,
+      'bullet Backspace after `- `: also the ladder\'s (top-level unlist)')
+    eq(md(['1. abc'], { index: 0, offset: 0 }, 'Backspace'), null,
+      'Backspace at the line head: native (joins the previous line)')
+    eq(md(['1. abc'], { index: 0, offset: 2 }, 'Delete'), null,
+      'Delete inside the marker: native (the caret cannot rest there anyway)')
     eq(md(['1. abc'], { index: 0, offset: 1 }, 'Delete'), null,
-      'Delete inside the marker: native')
+      'Delete at offset 1 (atom interior): native')
     eq(md(['1. abc'], { index: 0, offset: 5 }, 'Backspace'), null,
-      'caret past the marker end (in content): native')
+      'caret past the atom end (in content): native per-character delete')
     eq(md(['plain'], { index: 0, offset: 5 }, 'Backspace'), null,
       'non-list line: never ours')
-    eq(md(['- abc'], null, 'Backspace'), null,
+    eq(md(['- abc'], null, 'Delete'), null,
       'unusable caret (selection/blur): never ours')
-    eq(md(['```', '1. code', '```'], { index: 1, offset: 3 }, 'Backspace'), null,
+    eq(md(['```', '1. code', '```'], { index: 1, offset: 0 }, 'Delete'), null,
       'marker-looking line inside a fence is code, not a list')
-    eq(md(['note\n```\n- x\n```'], { index: 0, offset: 11 }, 'Backspace'), null,
+    eq(md(['note\n```\n- x\n```'], { index: 0, offset: 6 }, 'Delete'), null,
       'soft-line marker inside an unpromoted visual fence: not a list')
-    eq(md(['1. abc'], { index: 0, offset: 3 }, 'Delete'), null,
-      'Backspace triggers at the marker END, Delete at its START — no cross-fire')
   }
 
   console.log('· planListMarkerHop')
@@ -573,8 +574,17 @@ if (I) {
       { index: 0, offset: 3 },
       '→ at the line head hops clear over `1. ` to the content head')
     eq(hop(['  1. abc'], { index: 0, offset: 5 }, 'ArrowLeft'),
-      { index: 0, offset: 2 },
-      'the indent is not part of the atom: ← lands after the indent')
+      { index: 0, offset: 0 },
+      'v2.8: the indent is part of the atom — ← from the content head lands at the LINE head')
+    eq(hop(['  1. abc'], { index: 0, offset: 0 }, 'ArrowRight'),
+      { index: 0, offset: 5 },
+      '→ at the line head hops clear over indent+marker in one stroke')
+    eq(hop(['  1. abc'], { index: 0, offset: 1 }, 'ArrowRight'),
+      { index: 0, offset: 5 },
+      'a caret that landed INSIDE the indent (a click): → exits to the far edge')
+    eq(hop(['  1. abc'], { index: 0, offset: 1 }, 'ArrowLeft'),
+      { index: 0, offset: 0 },
+      'inside the indent: ← exits backward — the interior is never walked')
     eq(hop(['12. abc'], { index: 0, offset: 1 }, 'ArrowRight'),
       { index: 0, offset: 4 },
       'a caret INSIDE a multi-digit marker (a click): → exits to the far edge')
@@ -582,7 +592,7 @@ if (I) {
       { index: 0, offset: 0 },
       'inside the marker: ← exits backward — the interior is never walked')
     eq(hop(['1. abc'], { index: 0, offset: 0 }, 'ArrowLeft'), null,
-      '← at the marker START: native (into the indent / previous line)')
+      '← at the atom START (the line head): native (into the previous line)')
     eq(hop(['1. abc'], { index: 0, offset: 3 }, 'ArrowRight'), null,
       '→ at the marker END: native (into the content)')
     eq(hop(['1. abc'], { index: 0, offset: 4 }, 'ArrowLeft'), null,
@@ -624,17 +634,23 @@ if (I) {
     eq(home(['12. abc'], { index: 0, offset: 3 }), { index: 0, offset: 4 },
       'multi-digit marker, back half: snaps to the end')
     eq(home(['1. abc'], { index: 0, offset: 0 }), null,
-      'AT the marker start (the line head): a legal rest point — stays')
+      'AT the atom start (the line head): a legal rest point — stays')
     eq(home(['1. abc'], { index: 0, offset: 3 }), null,
-      'AT the marker end (the content head): a legal rest point — stays')
+      'AT the atom end (the content head): a legal rest point — stays')
     eq(home(['1. abc'], { index: 0, offset: 4 }), null,
       'mid-content: never ours')
     eq(home(['plain'], { index: 0, offset: 2 }), null,
       'non-list line: never ours')
     eq(home(['1. abc'], null), null,
       'unusable caret (range selection / blur): never ours')
-    eq(home(['  - abc'], { index: 0, offset: 3 }), { index: 0, offset: 2 },
-      'the indent is not part of the atom: homes to after the indent')
+    eq(home(['  - abc'], { index: 0, offset: 3 }), { index: 0, offset: 4 },
+      'v2.8: the indent is inside the atom — back-half interiors home to the content head')
+    eq(home(['  - abc'], { index: 0, offset: 1 }), { index: 0, offset: 0 },
+      'a caret inside the indent (a ↓/click arrival): homes to the LINE head')
+    eq(home(['  - abc'], { index: 0, offset: 2 }), { index: 0, offset: 0 },
+      'between the indent and the dash (the v2.7 legal point): now interior → the line head')
+    eq(home(['    1. x'], { index: 0, offset: 5 }), { index: 0, offset: 7 },
+      'deep nesting: interior of indent+marker homes to the nearest edge')
     eq(home(['intro\n12. b'], { index: 0, offset: 7 }), { index: 0, offset: 6 },
       'soft-line markers home at their flat offsets (front half → the soft line head)')
     eq(home(['intro\n12. b'], { index: 0, offset: 9 }), { index: 0, offset: 10 },
@@ -681,8 +697,9 @@ if (I) {
       [[], [{ at: 0, kind: 'bullet' }, { at: 1, kind: 'bullet-space' }]],
       'an uncommitted fence covers only its own line: the plain line below styles')
     eq(style(['-x', '1.x', '    - deep', '10. t']),
-      [[], [], [], [{ at: 0, kind: 'num' }, { at: 1, kind: 'num' }]],
-      'non-markers (no space, >3 indent) never style; real markers do')
+      [[], [], [{ at: 4, kind: 'bullet' }, { at: 5, kind: 'bullet-space' }],
+        [{ at: 0, kind: 'num' }, { at: 1, kind: 'num' }]],
+      'non-markers (no space) never style; v2.8 nests at any indent, so a deep bullet styles too')
     eq(style(['plain']), [[]], 'no markers → empty plan')
   }
 
@@ -736,109 +753,230 @@ if (I) {
     eq(sd(['1. a'], null), [], 'unusable caret: nothing to shift')
   }
 
-  console.log('· planListBackspace')
+  console.log('· listItemAtomOf')
   {
-    const bs = I.planListBackspace
-    eq(bs(['1. one', '2. two'], { index: 1, offset: 3 }),
-      { kind: 'join', index: 1, start: 0, prefix: '2. ', indent: '', seed: 2, sameBlock: false },
-      'Backspace after `2. ` (not first): JOIN into the line above, reanchor seed = prev+1')
-    eq(bs(['1. one', '2. two', '3. three'], { index: 1, offset: 3 }),
-      { kind: 'join', index: 1, start: 0, prefix: '2. ', indent: '', seed: 2, sameBlock: false },
-      'a member below does not change the join/seed arithmetic')
-    eq(bs(['1. one\n2. two'], { index: 0, offset: 10 }),
-      { kind: 'join', index: 0, start: 7, prefix: '2. ', indent: '', seed: 2, sameBlock: true, nlOffset: 6 },
-      'soft-line member above: same-block join carries the separator offset')
-    eq(bs(['intro\n1. one\n2. two'], { index: 0, offset: 16 }),
-      { kind: 'join', index: 0, start: 13, prefix: '2. ', indent: '', seed: 2, sameBlock: true, nlOffset: 12 },
-      'a soft-lined list after a plain head line joins within the block')
-    eq(bs(['  1. a', '  2. b'], { index: 1, offset: 5 }),
-      { kind: 'join', index: 1, start: 2, prefix: '2. ', indent: '  ', seed: 2, sameBlock: false },
-      'indented run: the indent rides the plan and stays out of the prefix')
-    eq(bs(['9. a', '10. b'], { index: 1, offset: 4 }),
-      { kind: 'join', index: 1, start: 0, prefix: '10. ', indent: '', seed: 10, sameBlock: false },
-      'multi-digit markers join with the parsed next seed')
-    eq(bs(['1. one', '2. '], { index: 1, offset: 3 }),
-      { kind: 'join', index: 1, start: 0, prefix: '2. ', indent: '', seed: 2, sameBlock: false },
-      'an empty non-first item joins too (nothing to splice, the line dies)')
-    eq(bs(['1. one', '2. two'], { index: 0, offset: 3 }),
-      { kind: 'detach', index: 0, start: 0, prefix: '1. ', indent: '', seed: 1 },
-      'Backspace after `1. ` on the FIRST member: DETACH, seed = own number')
-    eq(bs(['5. only'], { index: 0, offset: 3 }),
-      { kind: 'detach', index: 0, start: 0, prefix: '5. ', indent: '', seed: 5 },
-      'a lone member detaches, re-anchoring below at its own number')
-    eq(bs(['1. '], { index: 0, offset: 3 }),
-      { kind: 'detach', index: 0, start: 0, prefix: '1. ', indent: '', seed: 1 },
-      'a bare first prefix detaches (empty plain line survives)')
-    eq(bs(['intro\n1. one'], { index: 0, offset: 9 }),
-      { kind: 'detach', index: 0, start: 6, prefix: '1. ', indent: '', seed: 1 },
-      'a plain soft line above breaks the run: detach at its flat offset')
-    eq(bs(['- one', '2. two'], { index: 1, offset: 3 }),
-      { kind: 'detach', index: 1, start: 0, prefix: '2. ', indent: '', seed: 2 },
-      'a bullet above breaks the ordered run: detach, never join onto a bullet')
-    eq(bs(['  1. a', '2. b'], { index: 1, offset: 3 }),
-      { kind: 'detach', index: 1, start: 0, prefix: '2. ', indent: '', seed: 2 },
-      'an indent change above breaks the run: detach')
-    eq(bs(['```', 'x', '```', '2. two'], { index: 3, offset: 3 }),
-      { kind: 'detach', index: 3, start: 0, prefix: '2. ', indent: '', seed: 2 },
-      'a fence above breaks the run: detach (the fence itself is never a member)')
-    eq(bs(['```', '1. one', '2. two', '```'], { index: 1, offset: 3 }), null,
-      'caret line inside a fence is code, never a list')
-    eq(bs(['note\n```\n2. x\n```'], { index: 0, offset: 11 }), null,
-      'caret on an unpromoted soft line inside a visual fence: not a list')
-    eq(bs(['- one', '- two'], { index: 1, offset: 2 }), null,
-      'bullet lines are the atomic marker delete\'s call, not ours')
-    eq(bs(['1. one'], { index: 0, offset: 5 }), null,
-      'caret in the content: native per-character delete')
-    eq(bs(['1. one'], { index: 0, offset: 2 }), null,
-      'caret inside the marker: native')
-    eq(bs(['plain'], { index: 0, offset: 3 }), null,
-      'a plain line is never ours')
-    eq(bs(['1. one'], null), null,
-      'unusable caret (selection/blur): never ours')
+    const atom = I.listItemAtomOf
+    const pick = (r) => (r === null ? null : {
+      v: r.v, indent: r.indent, marker: r.marker, start: r.start, end: r.end,
+    })
+    eq(pick(atom(['1. abc'], { index: 0, offset: 3 })),
+      { v: 0, indent: '', marker: '1. ', start: 0, end: 3 },
+      'top-level ordered: the atom is the whole marker, start at the line head')
+    eq(pick(atom(['  - abc'], { index: 0, offset: 4 })),
+      { v: 0, indent: '  ', marker: '- ', start: 0, end: 4 },
+      'v2.8: the indent is INSIDE the atom — start is the line head, end the content head')
+    eq(pick(atom(['intro\n    1. x'], { index: 0, offset: 11 })),
+      { v: 1, indent: '    ', marker: '1. ', start: 6, end: 13 },
+      'a soft-line item at any nesting depth resolves its flat atom span')
+    eq(atom(['plain'], { index: 0, offset: 3 }), null,
+      'a non-list line carries no atom')
+    eq(atom(['1. abc'], null), null,
+      'unusable caret: no atom')
+    eq(atom(['```', '1. code', '```'], { index: 1, offset: 3 }), null,
+      'marker-looking line inside a fence is code, not a list')
   }
 
-  console.log('· planListReanchor')
+  console.log('· parentItemWidthOf (the cap\'s parent context, v2.9)')
   {
-    const ra = I.planListReanchor
-    eq(ra(['one', '2. two', '3. three'], { index: 0, offset: 0 }, '', 1),
-      [{ index: 1, start: 0, end: 1, digits: '1' }, { index: 2, start: 0, end: 1, digits: '2' }],
-      'detach of `1. `: below re-anchors at 1., 2. (2.→1., 3.→2.)')
-    eq(ra(['1. onetwo', '3. three'], { index: 0, offset: 8 }, '', 2),
-      [{ index: 1, start: 0, end: 1, digits: '2' }],
-      'join of `2. `: below closes the gap onto the joined line (3.→2.)')
-    eq(ra(['intro\none\n2. two\n3. three'], { index: 0, offset: 7 }, '', 1),
-      [{ index: 0, start: 10, end: 11, digits: '1' }, { index: 0, start: 17, end: 18, digits: '2' }],
-      'soft-lined survivors re-anchor at their flat offsets')
-    eq(ra(['one', '2. two', '  3. deep'], { index: 0, offset: 0 }, '', 1),
-      [{ index: 1, start: 0, end: 1, digits: '1' }],
-      'an indent change stops the walk: the nested list keeps its numbers')
-    eq(ra(['one', '2. two', '- x'], { index: 0, offset: 0 }, '', 1),
-      [{ index: 1, start: 0, end: 1, digits: '1' }],
-      'a bullet line stops the walk')
-    eq(ra(['one', '2. two', 'plain', '9. x'], { index: 0, offset: 0 }, '', 1),
-      [{ index: 1, start: 0, end: 1, digits: '1' }],
-      'a plain line stops the walk: the far group is a different run')
-    eq(ra(['one', '2. two', '```', '3. x', '```'], { index: 0, offset: 0 }, '', 1),
-      [{ index: 1, start: 0, end: 1, digits: '1' }],
-      'a fence stops the walk: fenced markers are code')
-    eq(ra(['one', '9. nine', '4. four'], { index: 0, offset: 0 }, '', 1),
-      [{ index: 1, start: 0, end: 1, digits: '1' }, { index: 2, start: 0, end: 1, digits: '2' }],
-      'manual jumps below are pulled continuous (9.→1., 4.→2.)')
-    eq(ra(['x', '7. a', '8. b'], { index: 0, offset: 0 }, '', 5),
-      [{ index: 1, start: 0, end: 1, digits: '5' }, { index: 2, start: 0, end: 1, digits: '6' }],
-      'the seed re-anchors at the freed number (7.→5., 8.→6.)')
-    eq(ra(['one', '2. two', '3. three'], { index: 0, offset: 0 }, '', 2),
-      [],
-      'an already-continuous tail emits no edits (convergence)')
-    eq(ra(['1. onetwo', '2. three'], { index: 0, offset: 8 }, '', 2),
-      [],
-      'the caret\'s own (joined) line is never rewritten')
-    eq(ra(['one'], { index: 0, offset: 0 }, '', 1),
-      [],
-      'no members below: nothing to re-anchor')
-    eq(ra(['one', '2. two'], null, '', 1),
-      [],
-      'unusable caret: nothing to re-anchor')
+    const pw = I.parentItemWidthOf
+    eq(pw(['- a', '- b'], 1), 0, 'the sibling above is the parent context (width 0)')
+    eq(pw(['- a', '  - b', '    - c'], 2), 2, 'a nested item\'s parent is the item above it')
+    eq(pw(['- a', 'plain', '  - c'], 2), 0, 'plain lines of any width are skipped, not parents')
+    eq(pw(['- a', '  - b'], 0), null, 'a list\'s first item has no parent above')
+    eq(pw(['- a', '', '- b'], 2), null, 'a blank ends the block: no parent across it')
+    eq(pw(['- a', '```', 'x', '```', '- b'], 4), null, 'a fence region ends the block: no parent across it')
+    eq(pw(['h:\n- a\n- b'], 2), 0, 'a plain head line above the list does not end the block')
+    eq(pw(['1. a', '  - b'], 1), 0, 'bullet/ordered mix: any item line is a parent context')
+  }
+
+  console.log('· planListLevelShift (the level ladder, v2.8; sink capped v2.9)')
+  {
+    const lv = I.planListLevelShift
+    // deeper: the item AND its whole subtree gain one level; a sibling stops.
+    eq(lv(['- a', '- b', '  - b1', '    - b2', '- c'], { index: 1, offset: 3 }, 'deeper'),
+      { kind: 'indent',
+        edits: [
+          { index: 1, at: 0, remove: 0, insert: '  ' },
+          { index: 2, at: 0, remove: 0, insert: '  ' },
+          { index: 3, at: 0, remove: 0, insert: '  ' },
+        ], caret: { index: 1, offset: 5 } },
+      'Tab: item + nested subtree each +2 (sinks under the sibling above); `- c` is untouched')
+    eq(lv(['1. a', '2. b'], { index: 1, offset: 5 }, 'deeper'),
+      { kind: 'indent',
+        edits: [{ index: 1, at: 0, remove: 0, insert: '  ' }], caret: { index: 1, offset: 7 } },
+      'a plain sibling sink: `2. b` nests under `1. a` (parent 0, self 0)')
+    eq(lv(['- a', '      wrapped', '- c'], { index: 2, offset: 3 }, 'deeper'),
+      { kind: 'indent',
+        edits: [{ index: 2, at: 0, remove: 0, insert: '  ' }], caret: { index: 2, offset: 5 } },
+      'deeper PLAIN lines above are skipped by the parent walk: `- c` still sinks under `- a`')
+    eq(lv(['h:\n- a\n- b'], { index: 0, offset: 9 }, 'deeper'),
+      { kind: 'indent',
+        edits: [{ index: 0, at: 7, remove: 0, insert: '  ' }], caret: { index: 0, offset: 11 } },
+      'soft-line items: the second line sinks at its flat line start (caret 9 → 11)')
+    eq(lv(['- a', '- b'], { index: 1, offset: 0 }, 'deeper'),
+      { kind: 'indent',
+        edits: [{ index: 1, at: 0, remove: 0, insert: '  ' }], caret: { index: 1, offset: 0 } },
+      'caret at the line head rides nothing: it stays the line head')
+    eq(lv(['- a', '- b'], { index: 1, offset: 2 }, 'deeper'),
+      { kind: 'indent',
+        edits: [{ index: 1, at: 0, remove: 0, insert: '  ' }], caret: { index: 1, offset: 4 } },
+      'the caret may sit anywhere on the item line — content head Tab works the same')
+    // the v2.9 cap: one level below the parent at most — claimed, but a no-op.
+    eq(lv(['- a'], { index: 0, offset: 3 }, 'deeper'),
+      { kind: 'noop', edits: [], caret: { index: 0, offset: 3 } },
+      'a list\'s FIRST item cannot sink: no parent above to nest under')
+    eq(lv(['- a', '  - b'], { index: 1, offset: 5 }, 'deeper'),
+      { kind: 'noop', edits: [], caret: { index: 1, offset: 5 } },
+      'an item already one level below its parent is AT the cap: no deeper')
+    eq(lv(['- a', '  - b', '    - c'], { index: 2, offset: 7 }, 'deeper'),
+      { kind: 'noop', edits: [], caret: { index: 2, offset: 7 } },
+      'deeper stacks are capped the same (c already one below b)')
+    eq(lv(['- a', '      - b'], { index: 1, offset: 9 }, 'deeper'),
+      { kind: 'noop', edits: [], caret: { index: 1, offset: 9 } },
+      'a hand-typed over-indented item (6 > parent 0) may not sink further')
+    eq(lv(['- a', '', '- b'], { index: 2, offset: 3 }, 'deeper'),
+      { kind: 'noop', edits: [], caret: { index: 2, offset: 3 } },
+      'a blank ends the parent walk: the item after it has nothing to nest under')
+    eq(lv(['- a', '```', 'x', '```', '- b'], { index: 4, offset: 3 }, 'deeper'),
+      { kind: 'noop', edits: [], caret: { index: 4, offset: 3 } },
+      'a fence region ends the parent walk: no parent across it')
+    eq(lv(['h:\n1. a\n  2. b'], { index: 0, offset: 6 }, 'deeper'),
+      { kind: 'noop', edits: [], caret: { index: 0, offset: 6 } },
+      'a plain head line is not a parent: the first list line under it cannot sink')
+    // shallower: one level up, subtree riding; odd indents floor at 0.
+    eq(lv(['- a', '  - b', '    - c', '- d'], { index: 1, offset: 5 }, 'shallower'),
+      { kind: 'dedent',
+        edits: [
+          { index: 1, at: 0, remove: 2, insert: '' },
+          { index: 2, at: 0, remove: 2, insert: '' },
+        ], caret: { index: 1, offset: 3 } },
+      'Shift+Tab on a nested item: it and its subtree shed one level; siblings stop')
+    eq(lv([' 1. a', '   - b'], { index: 0, offset: 5 }, 'shallower'),
+      { kind: 'dedent',
+        edits: [
+          { index: 0, at: 0, remove: 1, insert: '' },
+          { index: 1, at: 0, remove: 2, insert: '' },
+        ], caret: { index: 0, offset: 4 } },
+      'odd (hand-typed) indents: the item loses min(2, own width), deeper lines −2')
+    eq(lv(['  - '], { index: 0, offset: 4 }, 'shallower'),
+      { kind: 'dedent',
+        edits: [{ index: 0, at: 0, remove: 2, insert: '' }], caret: { index: 0, offset: 2 } },
+      'a bare nested prefix dedents too (empty item, caret at its end)')
+    // top-level shallower: UNLIST — the atom dies, content stays, subtree rises.
+    eq(lv(['- a', '  - b', '    - c'], { index: 0, offset: 2 }, 'shallower'),
+      { kind: 'unlist',
+        edits: [
+          { index: 0, at: 0, remove: 2, insert: '' },
+          { index: 1, at: 0, remove: 2, insert: '' },
+          { index: 2, at: 0, remove: 2, insert: '' },
+        ], caret: { index: 0, offset: 0 } },
+      'top-level unlist: the marker dies, content stays plain; children still rise')
+    eq(lv(['1. one', '2. two', '3. three'], { index: 1, offset: 3 }, 'shallower'),
+      { kind: 'unlist',
+        edits: [{ index: 1, at: 0, remove: 3, insert: '' }], caret: { index: 1, offset: 0 } },
+      'a mid-list unlist leaves the plain line behind (the tail restarts at 1 via renumber)')
+    // boundaries: blank and fence lines stop the subtree walk.
+    eq(lv(['- a', '- b', '', '  - c'], { index: 1, offset: 3 }, 'deeper'),
+      { kind: 'indent',
+        edits: [{ index: 1, at: 0, remove: 0, insert: '  ' }], caret: { index: 1, offset: 5 } },
+      'a blank line ends the subtree (the run-semantics boundary)')
+    eq(lv(['- a', '- b', '  ```', '  code', '  ```', '  - c'], { index: 1, offset: 3 }, 'deeper'),
+      { kind: 'indent',
+        edits: [{ index: 1, at: 0, remove: 0, insert: '  ' }], caret: { index: 1, offset: 5 } },
+      'a fence region ends the subtree: fenced bytes never shift')
+    // guards.
+    eq(lv(['plain'], { index: 0, offset: 3 }, 'deeper'), null,
+      'a plain line: never ours (Tab keeps its native behavior)')
+    eq(lv(['```', '1. code', '```'], { index: 1, offset: 3 }, 'deeper'), null,
+      'an item-looking line inside a fence is code, never a list')
+    eq(lv(['1. abc'], null, 'deeper'), null,
+      'unusable caret (range selection / blur): never ours')
+  }
+
+  console.log('· applyLevelEdits (stub nodes)')
+  {
+    const apply = I.applyLevelEdits
+    // Same stub discipline as applyDigitRenames above.
+    const makeText = (key, text) => ({
+      key,
+      __text: text,
+      getTextContent() { return this.__text },
+      getKey() { return this.key },
+      spliceText(offset, delCount, newText) {
+        this.__text = this.__text.slice(0, offset) + newText + this.__text.slice(offset + delCount)
+        return this
+      },
+    })
+    const makePara = (kids) => ({ getChildren: () => kids })
+    const makePoint = (key, offset) => ({
+      key, offset, type: 'text',
+      set(k, o, t) { this.key = k; this.offset = o; this.type = t },
+    })
+    const makeEditor = (anchor, focus) => ({
+      getEditorState: () => ({ _selection: { anchor, focus } }),
+    })
+    const asBlocks = (para) => [{ node: para, leaves: [], text: '' }]
+
+    // Indent insert at a block head; the live caret rides the splice.
+    {
+      const n = makeText('t1', '- a')
+      const sel = makePoint('t1', 3)
+      apply(makeEditor(sel, sel), asBlocks(makePara([n])),
+        { kind: 'indent',
+          edits: [{ index: 0, at: 0, remove: 0, insert: '  ' }], caret: { index: 0, offset: 5 } })
+      ok(n.__text === '  - a', `indent splice writes two spaces at the head (got ${JSON.stringify(n.__text)})`)
+      ok(sel.offset === 5, `the live point rides the insertion (got ${sel.offset})`)
+    }
+    // Dedent removal spanning fragmented leaves (isolated glyph husks).
+    {
+      const a = makeText('t1', '  ')
+      const b = makeText('t2', '-')
+      const c = makeText('t3', ' x')
+      const sel = makePoint('t3', 2)
+      apply(makeEditor(sel, sel), asBlocks(makePara([a, b, c])),
+        { kind: 'dedent',
+          edits: [{ index: 0, at: 0, remove: 2, insert: '' }], caret: { index: 0, offset: 2 } })
+      ok(a.__text === '' && b.__text === '-' && c.__text === ' x',
+        `removal splices the leaf that carries the span (got ${JSON.stringify([a.__text, b.__text, c.__text])})`)
+      ok(sel.offset === 2,
+        `a point on another leaf keeps its local offset (the removal is elsewhere; got ${sel.offset})`)
+    }
+    // Soft-line subtree: several edits in one block, applied right-to-left.
+    {
+      const n = makeText('t1', 'h:\n1. a\n  2. b')
+      const sel = makePoint('t1', 6)
+      apply(makeEditor(sel, sel), asBlocks(makePara([n])),
+        { kind: 'indent',
+          edits: [
+            { index: 0, at: 3, remove: 0, insert: '  ' },
+            { index: 0, at: 8, remove: 0, insert: '  ' },
+          ], caret: { index: 0, offset: 8 } })
+      ok(n.__text === 'h:\n  1. a\n    2. b',
+        `both soft lines of the block shift (got ${JSON.stringify(n.__text)})`)
+      ok(sel.offset === 8, `the live point shifts past both insertions (got ${sel.offset})`)
+    }
+    // Unlist of a bare marker empties the block → the pristine reset.
+    {
+      const n = makeText('t1', '1. ')
+      const para = makePara([n])
+      const removed = []
+      n.remove = () => removed.push(n.key)
+      para.selectStart = () => { para.selected = true }
+      apply(makeEditor(undefined, undefined), asBlocks(para),
+        { kind: 'unlist',
+          edits: [{ index: 0, at: 0, remove: 3, insert: '' }], caret: { index: 0, offset: 0 } })
+      ok(n.__text === '', `the bare marker is spliced away (got ${JSON.stringify(n.__text)})`)
+      ok(removed.includes('t1') && para.selected === true,
+        'an emptied block strips its husk leaves and element-selects (the consumeFlatRange reset)')
+    }
+    // No selection at all (blurred editor): edits still apply.
+    {
+      const n = makeText('t1', '- a')
+      apply(makeEditor(undefined, undefined), asBlocks(makePara([n])),
+        { kind: 'indent',
+          edits: [{ index: 0, at: 0, remove: 0, insert: '  ' }], caret: { index: 0, offset: 5 } })
+      ok(n.__text === '  - a', 'works with no live selection')
+    }
   }
 
   console.log('· applyDigitRenames (stub nodes)')
@@ -1096,7 +1234,9 @@ if (I) {
   eq(I.computeEnterPlan(['1. '], 0), { kind: 'list-exit', prefix: '1. ' }, 'E2 empty ordered exits')
   eq(I.computeEnterPlan(['  - '], 0), { kind: 'list-exit', prefix: '  - ' }, 'E2 keeps indent in prefix')
   eq(I.computeEnterPlan(['-'], 0), null, 'bare dash without space is not a list')
-  eq(I.computeEnterPlan(['    - a'], 0), null, 'indent > 3 is not a list (CommonMark)')
+  eq(I.computeEnterPlan(['    - a'], 0),
+    { kind: 'list-continue', indent: '    ', marker: '- ', offset: 7 },
+    'v2.8: nesting at ANY indent continues with its own indent (was: >3 not a list)')
   eq(I.computeEnterPlan(['-foo'], 0), null, 'no space after marker → not a list')
   eq(I.computeEnterPlan(['/claim token'], 0), null, 'E6 claim lines never match')
   eq(I.computeEnterPlan(['plain text'], 0), null, 'plain line → native Enter (submit)')
@@ -1226,6 +1366,9 @@ ok(clientSource.includes("tag: HISTORY_MERGE_TAG") || clientSource.includes("'hi
 ok(clientSource.includes('event.stopImmediatePropagation()'), 'matched Shift+Enter is kept from Lexical')
 ok(clientSource.includes('keyCode === IME_KEYCODE'), 'IME keyCode 229 guard')
 ok(clientSource.includes('event.repeat') && clientSource.includes('event.defaultPrevented'), 'repeat + yielded-key guards')
+ok(clientSource.includes("keys: new Set(['Tab'])")
+  && clientSource.includes('return !event.ctrlKey && !event.metaKey && !event.altKey;'),
+  'Tab ladder claims held repeats (repeats re-plan; an item line never falls through to focus traversal)')
 ok(clientSource.includes('return event.shiftKey')
   && clientSource.includes('!event.ctrlKey && !event.metaKey && !event.altKey'),
   'plain Enter / Ctrl+Cmd+Enter / Alt variants are never intercepted (native submit preserved)')
@@ -1277,7 +1420,7 @@ ok(clientSource.includes("klassOf(editor, 'linebreak')"),
 ok(clientSource.includes('caretBlockPoint'),
   'enter arbitration reads the caret\'s flat offset (visual-line model)')
 ok(clientSource.includes('planListMarkerDelete') && clientSource.includes('BULLET_ITEM_RE'),
-  'list markers are atomic: Backspace after `1. `/`- ` (Delete before) removes the whole marker')
+  'list atoms are atomic: Delete before an atom (indent+marker) removes the whole unit in one stroke')
 ok(clientSource.includes('planListMarkerHop') && clientSource.includes("'ArrowLeft'") && clientSource.includes("'ArrowRight'"),
   'atomic markers TRAVEL whole too: plain ←/→ hop over the marker, never through its interior')
 ok(clientSource.includes('placeFlatCaret(block.node, plan.offset)'),
@@ -1307,8 +1450,20 @@ ok(clientSource.includes('shapeMismatch(block,\n          analysis.spans[i],\n  
   'the shape stage isolates marker glyph leaves with the same single-char machinery as code delimiters')
 ok(clientSource.includes('planListShiftDown'),
   'ordered continuation shifts the run below +1 (insert keeps the list continuous, duplicate-free)')
-ok(clientSource.includes('planListBackspace') && clientSource.includes('planListReanchor'),
-  'ordered marker Backspace joins into the line above / detaches the first member, re-anchoring the run below')
+ok(clientSource.includes('planListLevelShift') && clientSource.includes('applyLevelEdits')
+  && clientSource.includes('LEVEL_STEP') && clientSource.includes("'shallower'")
+  && clientSource.includes("'deeper'"),
+  'v2.8 level ladder: Tab/Shift+Tab/Backspace-at-the-atom lift or sink an item with its whole subtree (one discrete update)')
+ok(clientSource.includes('parentItemWidthOf') && clientSource.includes("kind: 'noop'")
+  && clientSource.includes("plan.kind === 'noop'"),
+  'v2.9 sink cap: an item may sink at most one level below its parent (nearest item above); a capped Tab claims the key but moves nothing')
+ok(clientSource.includes('listItemAtomOf') && clientSource.includes('caret.offset === atom.end'),
+  'Backspace right after a list atom (indent+marker) is the ladder\'s lift gesture')
+ok(clientSource.includes("'unlist'") && clientSource.includes('keys: new Set([\'Tab\'])'),
+  'a top-level lift UNLISTS the item (atom dies, content stays) and the Tab gesture owns the ladder')
+ok(!clientSource.includes('planListBackspace') && !clientSource.includes('planListReanchor')
+  && !clientSource.includes('joinSoftLineAbove') && !clientSource.includes('joinParagraphAbove'),
+  'the v1.13 join/detach Backspace is gone — the ladder unlist replaced it (no dead planners bundled)')
 
 // architecture shape (v2.0 refactor): layers + no duplicated derivations
 ok(clientSource.includes('visualModelOf') && clientSource.includes('createRestyler') && clientSource.includes('createGestures'),

@@ -68,12 +68,13 @@
       // list planning
       planListRenumber: onLines((model) => ({ edits: LIST_PLAN.renumberEditsOf(model) })),
       planListMarkerStyleForBlocks: onLines(LIST_PLAN.markerGlyphsOf),
+      listItemAtomOf: onLines(LIST_PLAN.listItemAtomOf),
+      parentItemWidthOf: onLines(LIST_PLAN.parentItemWidthOf),
+      planListLevelShift: onLines(LIST_PLAN.planListLevelShift),
       planListMarkerDelete: onLines(LIST_PLAN.planListMarkerDelete),
       planListMarkerHop: onLines(LIST_PLAN.planListMarkerHop),
       planListMarkerCaretHome: onLines(LIST_PLAN.planListMarkerCaretHome),
       planListShiftDown: onLines(LIST_PLAN.planListShiftDown),
-      planListBackspace: onLines(LIST_PLAN.planListBackspace),
-      planListReanchor: onLines(LIST_PLAN.planListReanchor),
       // edit algebra (works on stub nodes)
       ...EDITS,
     };

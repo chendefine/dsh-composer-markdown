@@ -44,31 +44,69 @@
  *                                    (the run stays continuous and
  *                                    duplicate-free; one undo step for
  *                                    insert + shift together)
- *   MK  Backspace/Delete at a   → an ORDERED prefix under Backspace
- *      list-prefix boundary        (v1.13) retires the whole ITEM: a
- *                                    non-first member JOINS the line
- *                                    above (`1. one / 2. two` →
- *                                    `1. onetwo`, the members below
- *                                    re-anchored to close the gap); the
- *                                    run's FIRST member DETACHES (only
- *                                    the marker dies, the line turns
- *                                    plain, and the members below
- *                                    re-anchor at the freed number —
- *                                    `1. 2. 3.` → plain + `1. 2.`).
- *                                    Everything else keeps the atomic
- *                                    prefix: `- ` (dash + space; the
- *                                    indent excluded) dies as one unit —
- *                                    Backspace right AFTER it, Delete
- *                                    right BEFORE it (ordered markers
- *                                    keep the atomic Delete) — one
- *                                    stroke, one undo step; any visual
- *                                    line, fences excluded, everything
- *                                    else native per-character
- *   LS  ←/→ at a list marker     → the atomic marker TRAVELS whole too
+ *   MK  Backspace/Delete at a   → the list atom is ONE unit — indent,
+ *      list-atom boundary         digits/dot/space, or indent/dash/
+ *                                    space (v2.8 folded the indent
+ *                                    in, the day the grammar started
+ *                                    nesting at any depth): Delete
+ *                                    right BEFORE it (at the line
+ *                                    head) removes the whole thing
+ *                                    in one stroke — the indent can
+ *                                    never be eaten char by char —
+ *                                    and Backspace right AFTER it is
+ *                                    the LEVEL LADDER's gesture (see
+ *                                    LL): one stroke, one undo step;
+ *                                    any visual line, fences
+ *                                    excluded, everything else native
+ *                                    per-character
+ *   LL  Tab / Shift+Tab /        → the list LEVEL LADDER (v2.8):
+ *      Backspace after the atom    with the collapsed caret anywhere
+ *                                    on an ordered/bullet item line
+ *                                    (content included), Tab sinks
+ *                                    the item one level (indent
+ *                                    +2 spaces) and Shift+Tab or
+ *                                    Backspace-at-the-atom-end lifts
+ *                                    it — and the move carries the
+ *                                    item's WHOLE SUBTREE (every
+ *                                    deeper line below, recursion
+ *                                    included) in ONE discrete
+ *                                    update. A top-level item lifting
+ *                                    further UNLISTS: the atom dies,
+ *                                    the content stays as plain
+ *                                    text, the subtree still rises
+ *                                    one level. SINKING IS CAPPED
+ *                                    (v2.9): an item may sit at most
+ *                                    ONE level below its parent
+ *                                    context — the nearest item line
+ *                                    above, plain lines skipped,
+ *                                    blanks/fences ending the block —
+ *                                    so a Tab past that (including
+ *                                    any Tab on a list's FIRST item)
+ *                                    still claims the key but moves
+ *                                    nothing (focus never jumps away
+ *                                    mid-list-editing). The subtree
+ *                                    walk stops at a fence region, a
+ *                                    blank line, or a sibling (a
+ *                                    line at/below the item's own
+ *                                    indent); fenced bytes never
+ *                                    shift. The ordered runs the move
+ *                                    reshuffles converge on the
+ *                                    renumber invariant by the next
+ *                                    restyle pass (a plain line left
+ *                                    behind by an unlist splits the
+ *                                    run — the tail restarts at 1).
+ *                                    This REPLACES the v1.13 join/
+ *                                    detach Backspace. Anywhere else
+ *                                    (plain lines, fences, range
+ *                                    selections, repeats, modifier
+ *                                    chords) is not ours: Tab keeps
+ *                                    DSH's native behavior untouched
+ *   LS  ←/→ at a list atom      → the atomic atom TRAVELS whole too
  *      (v2.2)                       (plain arrows only): → hops from the
- *                                    line head clear over `1. ` / `- `
- *                                    to the content head, ← hops back; a
- *                                    caret that landed inside a marker (a
+ *                                    line head clear over `␣␣1. ` /
+ *                                    `␣␣- ` (indent included) to the
+ *                                    content head, ← hops back; a
+ *                                    caret that landed inside an atom (a
  *                                    click) exits to the far edge — the
  *                                    interior is never walked. The marker
  *                                    glyphs also RENDER distinct (edit
@@ -98,6 +136,15 @@
  *                                    caret-less and dead); the caret after
  *                                    any partial erase parks on the first
  *                                    NON-empty leaf, never on a husk.
+ *      (v2.8)                       The atom grew a head: the leading
+ *                                    INDENT is interior now too (the
+ *                                    grammar nests at any depth), so
+ *                                    no arrow ever steps into the
+ *                                    indent spaces, a stray caret
+ *                                    there is homed out like any other
+ *                                    interior position, and Delete at
+ *                                    the line head eats indent+marker
+ *                                    in one stroke.
  *      (v2.4)                       The bullet atom renders as ONE whole
  *                                    unit: the trailing space after `-`
  *                                    /`*` joins the "•" dot in the
@@ -224,9 +271,14 @@
  * A Shift+Enter that matches no plan passes through to the native soft
  * line break; Enter / Ctrl+Enter / Alt variants are never intercepted.
  * Backspace/Delete pass through untouched unless the collapsed caret
- * sits exactly on a list-prefix boundary (MK — the atomic bullet/unit
- * delete, or the ordered join/detach of v1.13) or a fence-box boundary
- * (R5's atomic delete) — plain, unmodified keys only.
+ * sits exactly on a list-atom boundary (MK — the atomic unit delete;
+ * LL — Backspace right after the atom lifts one ladder rung) or a
+ * fence-box boundary (R5's atomic delete) — plain, unmodified keys
+ * only. Tab/Shift+Tab pass through unless the caret's line is a list
+ * item (LL); a modifier chord is never ours, and held repeats re-plan
+ * like any press (a held Tab sinks once and holds at the cap, claimed
+ * and inert — passing repeats through would let the native default
+ * move focus out of the composer mid-edit).
  * Everything here is edit-state only: text content is never rewritten by
  * the styling pass, and the inserted prefixes are exactly the literal
  * markdown the user would have typed — save ONE deliberate exception:
@@ -329,9 +381,9 @@
  *   src/client/enter-plan.js   pure Shift+Enter arbitration (one
  *                              decision tree: fences, then lists)
  *   src/client/list-plan.js    pure list planning (the state-driven
- *                              renumber walk, marker glyphs, atomic
- *                              delete/hop/caret-home, join/detach,
- *                              shift-down, reanchor)
+ *                              renumber walk, marker glyphs, atom
+ *                              geometry + atomic delete/hop/caret-home,
+ *                              the level ladder, shift-down)
  *   src/client/analysis.js     ONE analyzeDraft(texts): the model plus
  *                              every domain projection, assembled once
  *                              per pass (the v2 code re-derived fences
@@ -401,20 +453,23 @@ window.__ModuleLoader__.load({
     /** Self-triggered restyle writes allowed per rolling second (loop guard). */
     const MAX_WRITES_PER_SECOND = 16;
 
-    /** Non-empty bullet item line: `- x` / `* x`, indent ≤ 3 spaces. */
-    const BULLET_RE = /^(\s{0,3})([-*]) \S/;
-    /** Non-empty ordered item line: `1. x` … `999999999. x`. */
-    const NUMBER_RE = /^(\s{0,3})(\d{1,9})\. \S/;
+    /** Spaces of indent one nesting level adds/removes (the Tab ladder). */
+    const LEVEL_STEP = 2;
+
+    /** Non-empty bullet item line: `- x` / `* x`, any indent (nesting, v2.8). */
+    const BULLET_RE = /^(\s*)([-*]) \S/;
+    /** Non-empty ordered item line: `1. x` … `999999999. x`, any indent. */
+    const NUMBER_RE = /^(\s*)(\d{1,9})\. \S/;
     /** Bullet prefix with no content (Enter here exits the list). */
-    const EMPTY_BULLET_RE = /^(\s{0,3})([-*]) $/;
+    const EMPTY_BULLET_RE = /^(\s*)([-*]) $/;
     /** Ordered prefix with no content (Enter here exits the list). */
-    const EMPTY_NUMBER_RE = /^(\s{0,3})(\d{1,9})\. $/;
+    const EMPTY_NUMBER_RE = /^(\s*)(\d{1,9})\. $/;
     /** Any ordered item line — with content or a bare prefix — used to
      *  group a list for renumbering (content may also be empty). */
-    const ORDERED_ITEM_RE = /^(\s{0,3})(\d{1,9})\. (?=\S|$)/;
+    const ORDERED_ITEM_RE = /^(\s*)(\d{1,9})\. (?=\S|$)/;
     /** Any bullet item line — with content or a bare prefix — used for
      *  the atomic marker delete (the marker dies as one unit). */
-    const BULLET_ITEM_RE = /^(\s{0,3})([-*]) (?=\S|$)/;
+    const BULLET_ITEM_RE = /^(\s*)([-*]) (?=\S|$)/;
     /** A continuation marker that carries an ordered number (`2. `). */
     const ORDERED_MARKER_RE = /^\d{1,9}\. $/;
     /** Any fence-marker line (``` at paragraph start, CommonMark indent ≤ 3). */
@@ -452,6 +507,7 @@ window.__ModuleLoader__.load({
       IME_KEYCODE,
       RECENT_COMPOSITION_MS,
       MAX_WRITES_PER_SECOND,
+      LEVEL_STEP,
       BULLET_RE,
       NUMBER_RE,
       EMPTY_BULLET_RE,
@@ -1839,9 +1895,9 @@ window.__ModuleLoader__.load({
      *
      * Deliberate trade: a run cannot HOLD a non-1 start or a manual
      * gap — typed digits snap continuous, because continuity IS the
-     * feature's contract (the same rule the gesture cascades
-     * planListShiftDown / planListReanchor always enforced for the
-     * runs they touch; v2.6 extends it to every run, every path).
+     * feature's contract (the same rule the gesture cascade
+     * planListShiftDown always enforced for the runs it touches;
+     * v2.6 extends it to every run, every path).
      *
      * The marker itself is ONE ATOM throughout the surface (v2.2):
      * Backspace/Delete already remove it whole, the horizontal arrows
@@ -1851,7 +1907,15 @@ window.__ModuleLoader__.load({
      * literal in draft, clipboard and send text. Since v2.3 no
      * collapsed caret ever RESTS inside it either, whichever way it
      * arrived (planListMarkerCaretHome, run by the restyle engine's
-     * caret-home stage).
+     * caret-home stage). Since v2.8 the atom is the WHOLE line head —
+     * the indent joins it (grammar now nests at any depth): arrows
+     * hop over indent+marker as one unit, a caret never rests inside
+     * the indent, and Delete at the line head removes the whole
+     * thing. The LEVEL LADDER rides the same atom: Tab indents an
+     * item (and its whole subtree) one LEVEL_STEP of spaces,
+     * Shift+Tab / Backspace-at-the-atom-end lifts it — a top-level
+     * item leaving the list keeps its content as plain text
+     * (planListLevelShift).
      *
      * Every planner here consumes the SHARED line model (./grammar)
      * through the same caret-line preamble — the run grouping and the
@@ -1860,7 +1924,7 @@ window.__ModuleLoader__.load({
      * editableLineOf). Because the plan is a pure function of the
      * current draft, it needs no cross-pass memory at all.
      */
-    const { ORDERED_ITEM_RE, BULLET_ITEM_RE } = require('./constants');
+    const { ORDERED_ITEM_RE, BULLET_ITEM_RE, LEVEL_STEP } = require('./constants');
     const { caretLineOf, editableLineOf } = require('./grammar');
 
     /**
@@ -1888,6 +1952,63 @@ window.__ModuleLoader__.load({
       if (hit === null) return null;
       const m = BULLET_ITEM_RE.exec(hit.line.text) ?? ORDERED_ITEM_RE.exec(hit.line.text);
       return m === null ? null : { ...hit, m };
+    }
+
+    /**
+     * The LIST-ITEM ATOM the caret's line carries: indent + marker as
+     * ONE unit (v2.8 — the indent joined the marker atom the day the
+     * grammar started nesting). start is the LINE head, end the
+     * content head; both are legal caret rest points, the open range
+     * between them is not (arrows hop it, the caret-home stage
+     * evicts strays, Backspace at end / Delete at start treat it as
+     * one deletion unit). Outside fences only — a marker-looking
+     * prefix inside a fence is code, not a list.
+     * @param {ReturnType<import('./grammar').visualModelOf>} model - the
+     *   shared line model.
+     * @param {{index: number, offset: number}|null} caret - the collapsed
+     *   caret's block index and flat char offset.
+     * @returns {{v: number, line: object, indent: string, marker: string,
+     *   start: number, end: number}|null}
+     */
+    function listItemAtomOf(model, caret) {
+      const hit = editableItemOf(model, caret);
+      if (hit === null) return null;
+      const { line, m } = hit;
+      return {
+        v: hit.v,
+        line,
+        indent: m[1],
+        marker: m[0].slice(m[1].length),
+        start: line.start,
+        end: line.start + m[0].length,
+      };
+    }
+
+    /**
+     * The indent width of the PARENT CONTEXT of visual line v: the
+     * nearest ITEM line strictly above it, skipping plain lines of any
+     * width (wrapped item text is content, not structure), stopping at
+     * a blank/whitespace-only line or any fence-covered line — the
+     * same block boundaries the subtree walk below uses (the renumber
+     * walk is near-identical: it treats only the strictly EMPTY line
+     * as its blank; a whitespace-only line additionally ends the
+     * ladder's blocks so a stray-spaces separator never rides a move).
+     * null when no item sits above inside the block: the line is
+     * its list's first member and has nothing to nest under.
+     * @param {ReturnType<import('./grammar').visualModelOf>} model - the
+     *   shared line model.
+     * @param {number} v - the item's visual line index.
+     * @returns {number|null} the parent item's indent width, or null.
+     */
+    function parentItemWidthOf(model, v) {
+      for (let w = v - 1; w >= 0; w -= 1) {
+        if (model.inFence(w)) return null; // a fence region ends the block
+        const text = model.lines[w].text;
+        if (/^\s*$/.test(text)) return null; // a blank ends the block
+        const m = ORDERED_ITEM_RE.exec(text) ?? BULLET_ITEM_RE.exec(text);
+        if (m !== null) return m[1].length;
+      }
+      return null;
     }
 
     /**
@@ -1967,67 +2088,60 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Plan an ATOMIC list-marker deletion (pure). The marker — digits,
-     * dot, space for `1. `, dash, space for `- `; the indent excluded —
-     * is one unit: a plain Backspace with the collapsed caret right
-     * AFTER it (between the trailing space and the content), or a plain
-     * Delete with the caret right BEFORE it (after the indent, at the
-     * content's left edge), removes the whole marker in one stroke
-     * instead of eating it character by character. Works on ANY visual
-     * line (soft-line lists included); a marker-looking prefix inside a
-     * fence — paragraph or yet-unpromoted soft line — is code, not a
-     * list, and never matches. Anything else is not ours: the native
+     * Plan an ATOMIC list-atom deletion (pure). The atom — indent,
+     * digits, dot, space for `␣␣1. `; indent, dash, space for
+     * `␣␣- ` — is one unit (v2.8 folded the indent in): a plain
+     * Delete with the collapsed caret right BEFORE it (at the line
+     * head) removes the whole atom in one stroke, so the indent can
+     * never be eaten character by character. Backspace at the atom's
+     * END is no longer this planner's — the LEVEL ladder owns that
+     * gesture (planListLevelShift lifts a nested item one level and
+     * unlists a top-level one). Works on ANY visual line (soft-line
+     * lists included); a marker-looking prefix inside a fence is
+     * code, not a list. Anything else is not ours: the native
      * per-character delete proceeds untouched.
-     *
-     * Dispatch note (v1.13): an ORDERED line with Backspace right after
-     * the marker never reaches this planner — planListBackspace claims
-     * that gesture first (join into the line above / detach as the
-     * run's first member). What survives here: bullets under Backspace,
-     * and both markers under forward Delete.
      * @param {ReturnType<import('./grammar').visualModelOf>} model - the
      *   shared line model.
      * @param {{index: number, offset: number}|null} caret - the collapsed
      *   caret's block index and flat char offset (null when unusable).
      * @param {'Backspace'|'Delete'} key - the deletion direction.
      * @returns {{index: number, start: number, prefix: string}|null}
-     *   start is the marker's flat offset (indent excluded), prefix its
-     *   literal chars; null → not ours.
+     *   start is the atom's flat offset (the line head), prefix its
+     *   literal chars (indent + marker); null → not ours.
      */
     function planListMarkerDelete(model, caret, key) {
-      const hit = editableItemOf(model, caret);
-      if (hit === null) return null;
-      const { line, m } = hit;
-      const start = line.start + m[1].length;
-      const prefix = m[0].slice(m[1].length);
-      const end = start + prefix.length;
-      if (key === 'Backspace' && caret.offset === end) return { index: caret.index, start, prefix };
-      if (key === 'Delete' && caret.offset === start) return { index: caret.index, start, prefix };
-      return null;
+      if (key !== 'Delete') return null; // Backspace at the atom end: the level ladder's
+      const atom = listItemAtomOf(model, caret);
+      if (atom === null) return null;
+      if (caret.offset !== atom.start) return null;
+      return { index: caret.index, start: atom.start, prefix: atom.indent + atom.marker };
     }
 
     /**
-     * Plan an ATOMIC list-marker HOP for the horizontal arrows (pure,
-     * v2.2): the marker that already deletes as one unit also TRAVELS
-     * as one unit. A plain ArrowLeft/ArrowRight never steps the caret
-     * into the marker's interior —
+     * Plan an ATOMIC list-atom HOP for the horizontal arrows (pure,
+     * v2.2; indent-inclusive since v2.8): the atom that deletes as
+     * one unit also TRAVELS as one unit. A plain ArrowLeft/ArrowRight
+     * never steps the caret into the atom's interior — indent and
+     * marker alike —
      *
      *   ArrowRight with the caret in [start, end)  → land at END
-     *   (right after the marker, the content's head);
+     *   (right after the atom, the content's head);
      *   ArrowLeft  with the caret in (start, end]  → land at START
-     *   (right before the marker, after the indent).
+     *   (the line head, before the whole indent).
      *
-     * So pressing → at the line head jumps clear over `1. `/`- ` in
-     * one stroke, ← at the content head jumps back over it, and a
-     * caret that landed INSIDE the marker by other means (a click, a
-     * collapsed selection) exits to the far edge in its direction of
-     * travel instead of walking the glyphs one by one. The indent is
-     * not part of the atom (same boundary the atomic delete uses), so
-     * a caret at START moving left, or at END moving right, keeps the
-     * native key. Modifier arrows (Shift+arrows build selections) are
-     * guarded off before this planner: a selection may still cover
-     * the marker characters — select-what-you-see keeps manual digit
-     * editing reachable. Works on ANY visual line; a marker-looking
-     * prefix inside a fence is code, never a list.
+     * So pressing → at the line head jumps clear over `␣␣1. `/`␣␣- `
+     * in one stroke, ← at the content head jumps back over it, and a
+     * caret that landed INSIDE the atom by other means (a click, a
+     * collapsed selection — including one in the INDENT, which v2.7
+     * still let the arrows walk through) exits to the far edge in its
+     * direction of travel instead of walking the glyphs one by one.
+     * The atom edges are the boundaries: a caret at START moving
+     * left, or at END moving right, keeps the native key. Modifier
+     * arrows (Shift+arrows build selections) are guarded off before
+     * this planner: a selection may still cover the atom characters —
+     * select-what-you-see keeps manual digit editing reachable. Works
+     * on ANY visual line; a marker-looking prefix inside a fence is
+     * code, never a list.
      * @param {ReturnType<import('./grammar').visualModelOf>} model - the
      *   shared line model.
      * @param {{index: number, offset: number}|null} caret - the collapsed
@@ -2037,37 +2151,36 @@ window.__ModuleLoader__.load({
      *   move the caret to; null → not ours, the native move proceeds.
      */
     function planListMarkerHop(model, caret, key) {
-      const hit = editableItemOf(model, caret);
-      if (hit === null) return null;
-      const { line, m } = hit;
-      const start = line.start + m[1].length;
-      const end = start + (m[0].length - m[1].length);
-      if (key === 'ArrowLeft' && caret.offset > start && caret.offset <= end) {
-        return { index: caret.index, offset: start };
+      const atom = listItemAtomOf(model, caret);
+      if (atom === null) return null;
+      if (key === 'ArrowLeft' && caret.offset > atom.start && caret.offset <= atom.end) {
+        return { index: caret.index, offset: atom.start };
       }
-      if (key === 'ArrowRight' && caret.offset >= start && caret.offset < end) {
-        return { index: caret.index, offset: end };
+      if (key === 'ArrowRight' && caret.offset >= atom.start && caret.offset < atom.end) {
+        return { index: caret.index, offset: atom.end };
       }
       return null;
     }
 
     /**
      * Plan the CARET HOME for a collapsed caret resting strictly INSIDE
-     * a list marker (pure, v2.3): the marker is one atom throughout the
-     * surface, and an atom has no interior for a caret to rest in —
-     * yet arrows that are not ours to arbitrate (↑/↓ keep their native
-     * column-preserving move) and clicks CAN land the caret between the
-     * glyphs. The restyle caret-home stage runs this every pass and
-     * moves such a caret to the NEAREST atom edge (a tie snaps to the
-     * start, matching the ArrowLeft exit), so the invariant "a
-     * collapsed caret never rests inside a list marker" holds no
-     * matter how the caret arrived. Edges themselves are legal rest
-     * points (before the marker = the line head, after it = the
-     * content head) and so do not move; only a range SELECTION may
-     * span the interior (select-what-you-see keeps manual digit
-     * editing reachable). The trigger range is OPEN on both sides —
-     * exactly the planListMarkerHop geometry, resolved through the
-     * same visual-line + fence guards as every other marker planner.
+     * a list atom (pure, v2.3; the indent joined the interior in
+     * v2.8): the atom is one unit throughout the surface, and an atom
+     * has no interior for a caret to rest in — yet arrows that are
+     * not ours to arbitrate (↑/↓ keep their native column-preserving
+     * move) and clicks CAN land the caret between the glyphs,
+     * including inside the leading indent spaces. The restyle
+     * caret-home stage runs this every pass and moves such a caret to
+     * the NEAREST atom edge (a tie snaps to the start, matching the
+     * ArrowLeft exit), so the invariant "a collapsed caret never
+     * rests inside a list atom" holds no matter how the caret
+     * arrived. Edges themselves are legal rest points (the line head
+     * before the whole indent, the content head after the marker) and
+     * so do not move; only a range SELECTION may span the interior
+     * (select-what-you-see keeps manual digit editing reachable). The
+     * trigger range is OPEN on both sides — exactly the
+     * planListMarkerHop geometry, resolved through the same
+     * visual-line + fence guards as every other marker planner.
      * @param {ReturnType<import('./grammar').visualModelOf>} model - the
      *   shared line model.
      * @param {{index: number, offset: number}|null} caret - the collapsed
@@ -2076,13 +2189,12 @@ window.__ModuleLoader__.load({
      *   home the caret to; null → the caret is already legal.
      */
     function planListMarkerCaretHome(model, caret) {
-      const hit = editableItemOf(model, caret);
-      if (hit === null) return null;
-      const { line, m } = hit;
-      const start = line.start + m[1].length;
-      const end = start + (m[0].length - m[1].length);
-      if (caret.offset > start && caret.offset < end) {
-        const offset = caret.offset - start <= end - caret.offset ? start : end;
+      const atom = listItemAtomOf(model, caret);
+      if (atom === null) return null;
+      if (caret.offset > atom.start && caret.offset < atom.end) {
+        const offset = caret.offset - atom.start <= atom.end - caret.offset
+          ? atom.start
+          : atom.end;
         return { index: caret.index, offset };
       }
       return null;
@@ -2184,134 +2296,138 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Plan the ordered-list marker Backspace (pure, v1.13): a plain
-     * Backspace with the collapsed caret right AFTER an ordered marker
-     * `N. ` — the same trigger the atomic marker delete owns for
-     * bullets — retires the ITEM, not just the glyphs, and how depends
-     * on the line's place in its run:
+     * Plan one rung of the list LEVEL LADDER (pure, v2.8): Tab sinks
+     * the caret's item one level (indent +LEVEL_STEP spaces),
+     * Shift+Tab / Backspace-at-the-atom-end lifts it — and the move
+     * carries the item's WHOLE SUBTREE, recursively:
      *
-     *   · NOT the run's first member → JOIN: the marker dies and the
-     *     line's whole content splices onto the END of the previous
-     *     member line (`1. one / 2. two` → `1. onetwo`); the members
-     *     below renumber to close the gap.
-     *   · the run's FIRST member → DETACH: only the marker dies, the
-     *     line turns plain, and the members below re-anchor at the
-     *     freed number (`2.`→`1.`, `3.`→`2.` …).
+     *   deeper    — the item and every line below it whose indent is
+     *               strictly deeper each gain one LEVEL_STEP of
+     *               leading spaces;
+     *   shallower — …each LOSE min(LEVEL_STEP, their own indent);
+     *   unlist    — a TOP-LEVEL item lifting further leaves the list
+     *               instead: its whole atom (indent — empty here —
+     *               plus marker) dies and the content stays as plain
+     *               text, while the subtree below still rises one
+     *               level.
      *
-     * The run is the same visual-line, same-indent, fence-excluded
-     * grouping the renumber pass uses: the line directly above — soft
-     * or paragraph, either — being a same-indent ordered member is
-     * what makes this line "not first"; a bullet, plain line, indent
-     * change, or fence above detaches instead. Fences guard both the
-     * caret line and the line above. Bullets and plain lines are not
-     * ours (null) — the atomic marker delete decides them.
+     * SINKING IS CAPPED (v2.9): an item may sit at most ONE level
+     * below its parent context — the nearest item line above, plain
+     * lines skipped, blanks/fences ending the block (parentItemWidthOf
+     * — the same boundaries the subtree walk uses). A Tab that would
+     * push the item deeper than parent+LEVEL_STEP — including any Tab
+     * on a list's FIRST item, which has nothing above to nest under —
+     * plans kind 'noop': the gesture still claims the key (Tab on a
+     * list line is always the ladder's), but nothing moves. Lifting
+     * is never capped; level 0 is its natural floor.
+     *
+     * The subtree walk stops at the first line that (a) lives in a
+     * fence region — fence markers and fenced bytes are never ours to
+     * shift — (b) is blank/whitespace-only, ending the visual block
+     * (near the renumber run semantics; the ladder also ends on a
+     * whitespace-only line), or (c) carries an
+     * indent at or above the item's own width: a sibling, not a
+     * child. The caret may sit ANYWHERE on the item line (content
+     * included) — the plan maps it through the head delta: the line
+     * head stays the line head, every other legal rest point rides
+     * the shift (an atom-interior position cannot occur — v2.3/v2.8
+     * see to that).
+     *
+     * The ordered runs the move reshuffles are NOT renumbered here:
+     * the restyle repairs stage converges on the renumber invariant
+     * (a nested run restarts 1..n on its own indent; a plain line
+     * left behind by an unlist splits the run and the tail restarts
+     * at 1 — the v2.6 contract) in the same undo neighbourhood.
      * @param {ReturnType<import('./grammar').visualModelOf>} model - the
      *   shared line model.
      * @param {{index: number, offset: number}|null} caret - the collapsed
      *   caret's block index and flat char offset (null when unusable).
+     * @param {'deeper'|'shallower'} mode - the ladder direction.
      * @returns {{
-     *   kind: 'join'|'detach',
-     *   index: number, start: number, prefix: string,
-     *   indent: string, seed: number,
-     *   sameBlock?: boolean, nlOffset?: number,
-     * }|null} start/prefix describe the marker range (indent excluded);
-     *   indent+seed feed the reanchor cascade (join: the previous
-     *   member's number + 1; detach: this line's own number);
-     *   join adds sameBlock (previous line inside the SAME block) and,
-     *   then, nlOffset (the flat '\n' right before this line). null →
-     *   not ours.
+     *   kind: 'indent'|'dedent'|'unlist'|'noop',
+     *   edits: {index: number, at: number, remove: number, insert: string}[],
+     *   caret: {index: number, offset: number},
+     * }|null} edits are per touched VISUAL line, at = the line's flat
+     *   start inside its block ('noop' carries none); caret is the
+     *   post-edit placement. null → not an item line (or the
+     *   caret/fence guards failed) — the gesture is not ours at all.
      */
-    function planListBackspace(model, caret) {
-      const hit = editableLineOf(model, caret);
-      if (hit === null) return null;
-      const { v, line } = hit;
-      const m = ORDERED_ITEM_RE.exec(line.text);
-      if (m === null) return null; // bullet/plain line: marker delete's call
-      const start = line.start + m[1].length;
-      const prefix = m[0].slice(m[1].length);
-      if (caret.offset !== start + prefix.length) return null; // only right after the marker
-      // First-of-run test: the visual line directly above, when it is a
-      // same-indent ordered member outside every fence.
-      if (v > 0) {
-        const above = ORDERED_ITEM_RE.exec(model.lines[v - 1].text);
-        if (above !== null && above[1] === m[1] && !model.inFence(v - 1)) {
-          const sameBlock = model.lines[v - 1].block === caret.index;
-          const join = {
-            kind: 'join',
-            index: caret.index,
-            start,
-            prefix,
-            indent: m[1],
-            seed: Number.parseInt(above[2], 10) + 1,
-            sameBlock,
-          };
-          if (sameBlock) join.nlOffset = line.start - 1;
-          return join;
+    function planListLevelShift(model, caret, mode) {
+      const atom = listItemAtomOf(model, caret);
+      if (atom === null) return null;
+      const width = atom.indent.length;
+      if (mode === 'deeper') {
+        // The cap: one level below the parent context at most. The
+        // item may sink iff its current width is at or above the
+        // nearest item above (a sibling sinks under its predecessor;
+        // an item already one level below — or deeper — may not).
+        const parentWidth = parentItemWidthOf(model, atom.v);
+        if (parentWidth === null || width > parentWidth) {
+          return { kind: 'noop', edits: [], caret: { index: caret.index, offset: caret.offset } };
         }
       }
-      return {
-        kind: 'detach',
-        index: caret.index,
-        start,
-        prefix,
-        indent: m[1],
-        seed: Number.parseInt(m[2], 10),
-      };
-    }
-
-    /**
-     * Plan the renumber reanchor below a retired ordered item (pure,
-     * v1.13): after a marker Backspace joined this line into the one
-     * above or detached it to plain text, every ordered member BELOW
-     * the caret's visual line — same indent run, fences excluded — is
-     * reassigned sequentially starting at startDigits (join: the
-     * previous member's number + 1; detach: the freed number), so
-     * `1. 2. 3.` losing its `2.` to a join reads `1. 2.` and a first
-     * item detaching from `1. 2. 3.` reads `1. 2.` below the plain
-     * line. Members already at their target emit no edit; a manual
-     * jump is pulled continuous, exactly like the insertion cascade
-     * (planListShiftDown) — the contract is a continuous, duplicate-
-     * free run. The walk stops at the first non-member line, an indent
-     * change, or a fence. The caret's OWN line is never rewritten.
-     * @param {ReturnType<import('./grammar').visualModelOf>} model - the
-     *   shared line model, as it reads AFTER the join/detach edit.
-     * @param {{index: number, offset: number}|null} caret - the
-     *   caret on the joined/plain line.
-     * @param {string} indent - the retired run's indent.
-     * @param {number} startDigits - the first below member's target.
-     * @returns {{index: number, start: number, end: number, digits: string}[]}
-     *   splices for the members below (block index + flat digit range).
-     */
-    function planListReanchor(model, caret, indent, startDigits) {
-      const hit = caretLineOf(model, caret);
-      if (hit === null) return [];
+      // The subtree: strictly deeper lines below, until a fence, a
+      // blank, or a line at/below the item's own indent width.
+      const members = [atom.line];
+      for (let v = atom.v + 1; v <= model.last; v += 1) {
+        if (model.inFence(v)) break;
+        const text = model.lines[v].text;
+        if (/^\s*$/.test(text)) break; // blank: end of the visual block
+        if (/^\s*/.exec(text)[0].length <= width) break; // sibling, not child
+        members.push(model.lines[v]);
+      }
+      const dedent = (line) => ({
+        index: line.block,
+        at: line.start,
+        remove: Math.min(LEVEL_STEP, /^\s*/.exec(line.text)[0].length),
+        insert: '',
+      });
+      let kind;
+      let itemDelta; // chars the item line's head gains (indent) or loses
       const edits = [];
-      let expected = startDigits;
-      for (let w = hit.v + 1; w <= model.last; w += 1) {
-        // Fence content (even a yet-unpromoted soft line) stops the run.
-        if (model.inFence(w)) break;
-        const line = model.lines[w];
-        const m = ORDERED_ITEM_RE.exec(line.text);
-        if (m === null || m[1] !== indent) break; // run ends here
-        if (String(expected) !== m[2]) {
-          const start = line.start + indent.length;
-          edits.push({ index: line.block, start, end: start + m[2].length, digits: String(expected) });
+      if (mode === 'deeper') {
+        kind = 'indent';
+        itemDelta = LEVEL_STEP;
+        for (const line of members) {
+          edits.push({ index: line.block, at: line.start, remove: 0, insert: '  ' });
         }
-        expected += 1;
+      } else if (width > 0) {
+        kind = 'dedent';
+        itemDelta = -Math.min(LEVEL_STEP, width);
+        for (const line of members) edits.push(dedent(line));
+      } else {
+        // Top of the ladder: the item leaves the list. The atom dies
+        // whole (the indent is empty at this level), the content
+        // stays; the subtree below still rises one level.
+        kind = 'unlist';
+        itemDelta = -atom.marker.length;
+        edits.push({ index: atom.line.block, at: atom.line.start, remove: atom.marker.length, insert: '' });
+        for (const line of members.slice(1)) edits.push(dedent(line));
       }
-      return edits;
+      // Caret mapping: the line head stays the line head; anything
+      // else (atom end or mid-content) rides the head delta. The
+      // arithmetic is line-relative, then re-based to BLOCK-flat
+      // coordinates (a soft-line item's line.start is not 0).
+      const at = caret.offset - atom.line.start;
+      const mapped = at <= 0 ? 0 : Math.max(0, at + itemDelta);
+      return {
+        kind,
+        edits,
+        caret: { index: atom.line.block, offset: atom.line.start + mapped },
+      };
     }
 
     module.exports = {
       orderedItemOf,
       renumberEditsOf,
+      listItemAtomOf,
+      parentItemWidthOf,
+      planListLevelShift,
       planListMarkerDelete,
       planListMarkerHop,
       planListMarkerCaretHome,
       markerGlyphsOf,
       planListShiftDown,
-      planListBackspace,
-      planListReanchor,
     };
     },
 
@@ -2450,30 +2566,6 @@ window.__ModuleLoader__.load({
         return;
       }
       placeFlatCaret(block.node, start);
-    }
-
-    /**
-     * Remove the soft-line separator at one flat offset — a LineBreak
-     * leaf whole, or a literal '\n' spliced out of its text leaf.
-     * @param {Block} block - a FRESH block view (re-read after any
-     *   prior erases, so leaf geometry is current).
-     * @param {number} offset - flat offset of the separator.
-     */
-    function removeSeparatorAt(block, offset) {
-      let flat = 0;
-      for (const leaf of block.leaves) {
-        const s = flat;
-        const e = flat + leaf.text.length;
-        flat = e;
-        if (offset < s || offset >= e) continue;
-        if (leaf.kind === 'br') {
-          leaf.node.remove?.();
-        } else if (leaf.kind === 'text'
-          && leaf.text.charCodeAt(offset - s) === 10) {
-          leaf.node.spliceText(offset - s, 1, '', false);
-        }
-        return;
-      }
     }
 
     /**
@@ -2736,50 +2828,109 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Join one ordered item into the soft line directly above it
-     * (marker Backspace on a non-first member, previous line inside the
-     * SAME paragraph): erase the marker, then remove the '\n' that
-     * separated the lines — a LineBreak leaf whole, a literal newline
-     * spliced out of its text leaf — so the content rides up against
-     * the previous line's end, byte-identical on both sides. The caret
-     * rests at the join point (the offset the '\n' occupied).
-     * @param {Block} block - the caret block.
-     * @param {{start: number, prefix: string, nlOffset: number}} plan -
-     *   the join plan's marker range and separator offset.
-     */
-    function joinSoftLineAbove(block, plan) {
-      eraseFlatRange(block, plan.start, plan.start + plan.prefix.length);
-      removeSeparatorAt(makeBlock(block.node), plan.nlOffset);
-      placeFlatCaret(block.node, plan.nlOffset);
-    }
-
-    /**
-     * Join one ordered item paragraph into the paragraph above it
-     * (marker Backspace on a non-first member living at its own
-     * paragraph head): erase the marker, move every remaining child of
-     * the item paragraph to the previous paragraph's end (order kept),
-     * then remove the emptied paragraph. An empty item simply
-     * disappears. The caret rests at the join point — the previous
-     * block's original text length, the boundary its last char and the
-     * moved tail share.
+     * Apply one planListLevelShift plan (the level ladder, v2.8):
+     * per touched visual line, insert or remove the LEVEL_STEP run at
+     * the line's flat head — the item line AND its whole subtree, in
+     * ONE update (one Ctrl+Z reverts the ladder move as a whole).
+     *
+     * Edits are applied RIGHT-TO-LEFT over (block index, flat offset)
+     * so a splice never shifts the range of an edit still to come;
+     * each edit re-reads its block's leaves, so any leaf
+     * fragmentation (the shape stage isolates marker glyphs into
+     * single-char leaves) is walked as it stands. A removal splices
+     * every text leaf its span touches (a chip/br inside the span —
+     * impossible for a line's leading spaces, but guarded against
+     * anyway — aborts just that edit); an insertion goes into the first
+     * non-empty text leaf the offset reaches, falling back to the
+     * last non-empty leaf's end. Every splice shifts the LIVE
+     * selection points across it (same riding rule as
+     * applyDigitRenames).
+     *
+     * The caret then parks at the plan's mapped offset on the item's
+     * block — with the consumeFlatRange safety net: an unlisted BARE
+     * marker empties its whole block, and empty husk leaves cannot
+     * carry a DOM-reachable selection, so the block resets to the
+     * pristine childless paragraph instead.
+     * @param {object} editor - the live editor.
      * @param {Block[]} blocks - the blocks read at plan time.
-     * @param {number} index - the item's block index (≥ 1).
-     * @param {{start: number, prefix: string}} plan - the join plan's
-     *   marker range.
+     * @param {{kind: string, edits: {index: number, at: number,
+     *   remove: number, insert: string}[], caret: {index: number,
+     *   offset: number}}} plan - the planListLevelShift plan.
      */
-    function joinParagraphAbove(blocks, index, plan) {
-      const block = blocks[index];
-      const prev = blocks[index - 1];
-      if (block === undefined || prev === undefined) return;
-      eraseFlatRange(block, plan.start, plan.start + plan.prefix.length);
-      let mover = block.node.getFirstChild?.();
-      while (mover != null) {
-        const next = mover.getNextSibling();
-        prev.node.append(mover);
-        mover = next;
+    function applyLevelEdits(editor, blocks, plan) {
+      if (plan.edits.length === 0) return; // a capped/noop plan: nothing to touch
+      const selection = liveSelectionOf(editor);
+      // Unique by identity: a stubbed (or aliased) collapsed caret must
+      // shift once, not once per endpoint.
+      const points = selection != null && selection.anchor != null && selection.focus != null
+        ? [...new Set([selection.anchor, selection.focus])]
+        : [];
+      const ordered = [...plan.edits].sort((a, b) => (b.index - a.index) || (b.at - a.at));
+      for (const edit of ordered) {
+        const block = blocks[edit.index];
+        if (block === undefined) continue;
+        if (edit.remove > 0) {
+          let offset = 0;
+          const overlapping = [];
+          let safe = true;
+          for (const leaf of makeBlock(block.node).leaves) {
+            const start = offset;
+            const end = offset + leaf.text.length;
+            offset = end;
+            if (end <= edit.at || start >= edit.at + edit.remove) continue;
+            if (leaf.kind !== 'text' || leaf.text === '') {
+              safe = false; // a chip/br inside the span: do not touch
+              break;
+            }
+            overlapping.push({
+              node: leaf.node,
+              from: Math.max(start, edit.at) - start,
+              to: Math.min(end, edit.at + edit.remove) - start,
+            });
+          }
+          if (!safe || overlapping.length === 0) continue;
+          for (const { node, from, to } of overlapping) {
+            const key = node.getKey();
+            node.spliceText(from, to - from, '', false);
+            for (const point of points) {
+              shiftPointOverSplice(point, key, from, to, 0);
+            }
+          }
+        } else if (edit.insert.length > 0) {
+          let lastText = null;
+          let target = null;
+          let flat = 0;
+          for (const leaf of makeBlock(block.node).leaves) {
+            const start = flat;
+            const end = flat + leaf.text.length;
+            flat = end;
+            if (leaf.kind !== 'text' || leaf.text === '') continue;
+            lastText = { node: leaf.node, len: leaf.text.length };
+            if (target === null && end >= edit.at) {
+              target = { node: leaf.node, from: Math.max(0, edit.at - start) };
+            }
+          }
+          const pick = target ?? (lastText !== null
+            ? { node: lastText.node, from: lastText.len }
+            : null);
+          if (pick === null) continue; // nothing text-ish to splice into
+          const key = pick.node.getKey();
+          pick.node.spliceText(pick.from, 0, edit.insert, false);
+          for (const point of points) {
+            shiftPointOverSplice(point, key, pick.from, pick.from, edit.insert.length);
+          }
+        }
       }
-      block.node.remove?.();
-      placeFlatCaret(prev.node, prev.text.length);
+      const block = blocks[plan.caret.index];
+      if (block === undefined) return;
+      if (makeBlock(block.node).text === '') {
+        // The reset rule of consumeFlatRange: a bare marker unlisted
+        // leaves only husk leaves — strip them, element-select.
+        for (const leaf of makeBlock(block.node).leaves) leaf.node.remove?.();
+        if (typeof block.node.selectStart === 'function') block.node.selectStart();
+        return;
+      }
+      placeFlatCaret(block.node, plan.caret.offset);
     }
 
     /**
@@ -3152,15 +3303,13 @@ window.__ModuleLoader__.load({
     module.exports = {
       eraseFlatRange,
       consumeFlatRange,
-      removeSeparatorAt,
       placeFlatCaret,
       shiftPointOverSplice,
       applyDigitRenames,
+      applyLevelEdits,
       newParagraphAfter,
       splitTailToNewParagraph,
       insertSoftContinuation,
-      joinSoftLineAbove,
-      joinParagraphAbove,
       removeBlockKeys,
       applyEnterPlan,
       applyFenceKeyPlan,
@@ -3576,19 +3725,18 @@ window.__ModuleLoader__.load({
     const { computeEnterPlan } = require('./enter-plan');
     const { planFenceKey } = require('./fence-plan');
     const {
+      listItemAtomOf,
+      planListLevelShift,
       planListMarkerDelete,
       planListMarkerHop,
       planListShiftDown,
-      planListBackspace,
-      planListReanchor,
     } = require('./list-plan');
     const {
       applyEnterPlan,
       applyFenceKeyPlan,
       applyDigitRenames,
+      applyLevelEdits,
       consumeFlatRange,
-      joinSoftLineAbove,
-      joinParagraphAbove,
       placeFlatCaret,
     } = require('./edits');
 
@@ -3704,10 +3852,11 @@ window.__ModuleLoader__.load({
     /**
      * Backspace / Delete / arrows with a plain collapsed caret: the
      * atomic gestures. The chain is ordered — fence box first, then
-     * (delete keys only) the ordered marker Backspace (join/detach),
-     * then the atomic marker delete, and (horizontal arrows only) the
-     * atomic marker hop — and the first non-null plan wins; everything
-     * else keeps the native key.
+     * (delete keys only) the LEVEL LADDER lift (Backspace right after
+     * a list atom: a nested item rises one level, a top-level one
+     * leaves the list), then the atomic atom delete, and (horizontal
+     * arrows only) the atomic atom hop — and the first non-null plan
+     * wins; everything else keeps the native key.
      */
     const atomicGesture = {
       keys: new Set([
@@ -3731,15 +3880,23 @@ window.__ModuleLoader__.load({
         if (fence !== null) return { kind: 'fence', plan: fence, blocks };
         if (key === 'Backspace' || key === 'Delete') {
           const caret = caretBlockPoint(editor, blocks);
-          if (key === 'Backspace') {
-            const join = planListBackspace(model, caret);
-            if (join !== null) return { kind: 'join', plan: join, blocks };
+          if (key === 'Backspace' && caret !== null) {
+            // Backspace right AFTER the list atom (the content head):
+            // one rung up the level ladder — a nested item sheds a
+            // LEVEL_STEP of indent (subtree riding along), a
+            // top-level item leaves the list (the atom dies, the
+            // content stays as plain text).
+            const atom = listItemAtomOf(model, caret);
+            if (atom !== null && caret.offset === atom.end) {
+              const lift = planListLevelShift(model, caret, 'shallower');
+              if (lift !== null) return { kind: 'level', plan: lift, blocks };
+            }
           }
           const marker = planListMarkerDelete(model, caret, key);
           if (marker !== null) return { kind: 'marker', plan: marker, blocks };
         }
         if (key === 'ArrowLeft' || key === 'ArrowRight') {
-          // The marker that deletes as one unit travels as one unit:
+          // The atom that deletes as one unit travels as one unit:
           // ←/→ hop over it instead of stepping through its interior.
           const hop = planListMarkerHop(model, caretBlockPoint(editor, blocks), key);
           if (hop !== null) return { kind: 'hop', plan: hop, blocks };
@@ -3756,49 +3913,81 @@ window.__ModuleLoader__.load({
           if (block !== undefined) placeFlatCaret(block.node, plan.offset);
           return;
         }
-        const block = blocks[plan.index];
-        if (kind === 'marker') {
-          if (block !== undefined) {
-            consumeFlatRange(editor, block, plan.start, plan.start + plan.prefix.length);
-          }
+        if (kind === 'level') {
+          // The ladder move is ONE update (subtree + caret); the
+          // ordered-run renumbering it reshuffles converges on the
+          // next restyle pass, history-merged into this undo step's
+          // neighbourhood.
+          applyLevelEdits(editor, blocks, plan);
           return;
         }
-        // Ordered marker Backspace: JOIN the item into the line
-        // above (non-first member) or DETACH the marker (first
-        // member, the line turns plain).
-        if (plan.kind === 'join') {
-          if (plan.sameBlock) {
-            if (block !== undefined) joinSoftLineAbove(block, plan);
-          } else {
-            joinParagraphAbove(blocks, plan.index, plan);
-          }
-        } else if (block !== undefined) {
+        const block = blocks[plan.index];
+        if (block !== undefined) {
           consumeFlatRange(editor, block, plan.start, plan.start + plan.prefix.length);
         }
-        // The retired item's number frees up: re-anchor every member
-        // below in the same run (join → previous number + 1; detach
-        // → the freed number). Same update — one Ctrl+Z reverts the
-        // join/detach and the renumber together.
-        const fresh = readBlocks(editor);
-        const point = caretBlockPoint(editor, fresh);
-        const edits = point === null
-          ? []
-          : planListReanchor(visualModelOf(fresh.map((b) => b.text)), point, plan.indent, plan.seed);
-        if (edits.length > 0) applyDigitRenames(editor, fresh, edits);
       },
       history({ kind, plan }) {
-        // Whole-box unwraps / joins / markers get their own undo step
-        // (one Ctrl+Z restores the markers); arrow moves (fence skips,
-        // marker hops) are selection-only and merge into adjacent
-        // history.
+        // Whole-box unwraps / atoms / ladder moves get their own undo
+        // step (one Ctrl+Z restores the markers or the level); arrow
+        // moves (fence skips, atom hops) are selection-only and merge
+        // into adjacent history.
         return (kind === 'fence' && plan.kind !== 'fence-unwrap') || kind === 'hop'
           ? { tag: HISTORY_MERGE_TAG }
           : { discrete: true };
       },
     };
 
+    /**
+     * Tab / Shift+Tab: the list LEVEL LADDER (v2.8). With the
+     * collapsed caret anywhere on an ordered/bullet item line —
+     * content included — Tab sinks the item one level (indent
+     * +LEVEL_STEP) and Shift+Tab or Backspace-at-the-atom-end lifts
+     * it — and the move carries the item's WHOLE SUBTREE (every
+     * deeper line below, recursion included) in ONE discrete update.
+     * A top-level item lifting further UNLISTS: the atom dies, the
+     * content stays as plain text, the subtree still rises one level.
+     *
+     * Sinking is CAPPED (v2.9): an item may sit at most one level
+     * below its parent context (the nearest item above; blanks and
+     * fences end the block), so a Tab that would exceed that —
+     * including any Tab on a list's first item — still CLAIMS the key
+     * (Tab on a list line is always the ladder's) but moves nothing:
+     * focus never jumps away mid-list-editing. That holds for HELD
+     * keys too: repeats re-plan like any press (a held Tab sinks once
+     * and then holds at the cap, claimed and inert; a held Shift+Tab
+     * climbs one rung per repeat until the unlist) — were repeats
+     * passed through instead, the native default would move focus out
+     * of the composer mid-edit. Anywhere else (plain lines, fence
+     * interiors, range selections, modifier chords) is not ours: Tab
+     * keeps DSH's native behavior (trigger-menu completion while a
+     * menu is open — guarded earlier — and browser focus traversal
+     * otherwise), untouched.
+     */
+    const indentGesture = {
+      keys: new Set(['Tab']),
+      guard(event) {
+        return !event.ctrlKey && !event.metaKey && !event.altKey;
+      },
+      prepare(event, editor) {
+        const blocks = readBlocks(editor);
+        if (caretPoint(editor, blocks) === null) return null; // collapsed only
+        const caret = caretBlockPoint(editor, blocks);
+        if (caret === null) return null;
+        const model = visualModelOf(blocks.map((b) => b.text));
+        const plan = planListLevelShift(model, caret, event.shiftKey ? 'shallower' : 'deeper');
+        return plan === null ? null : { kind: 'level', plan, blocks };
+      },
+      apply({ plan, blocks }, editor) {
+        if (plan.kind === 'noop') return; // capped: claimed, nothing moves
+        applyLevelEdits(editor, blocks, plan);
+      },
+      history() {
+        return { discrete: true };
+      },
+    };
+
     /** The gesture policy table, in arbitration order. */
-    const GESTURES = [enterGesture, atomicGesture];
+    const GESTURES = [enterGesture, atomicGesture, indentGesture];
 
     /**
      * Bind the key surface to a wiring hook (the restyle engine's
@@ -4395,12 +4584,13 @@ window.__ModuleLoader__.load({
       // list planning
       planListRenumber: onLines((model) => ({ edits: LIST_PLAN.renumberEditsOf(model) })),
       planListMarkerStyleForBlocks: onLines(LIST_PLAN.markerGlyphsOf),
+      listItemAtomOf: onLines(LIST_PLAN.listItemAtomOf),
+      parentItemWidthOf: onLines(LIST_PLAN.parentItemWidthOf),
+      planListLevelShift: onLines(LIST_PLAN.planListLevelShift),
       planListMarkerDelete: onLines(LIST_PLAN.planListMarkerDelete),
       planListMarkerHop: onLines(LIST_PLAN.planListMarkerHop),
       planListMarkerCaretHome: onLines(LIST_PLAN.planListMarkerCaretHome),
       planListShiftDown: onLines(LIST_PLAN.planListShiftDown),
-      planListBackspace: onLines(LIST_PLAN.planListBackspace),
-      planListReanchor: onLines(LIST_PLAN.planListReanchor),
       // edit algebra (works on stub nodes)
       ...EDITS,
     };

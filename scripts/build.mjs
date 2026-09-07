@@ -96,31 +96,69 @@ const PROLOGUE = `\
  *                                    (the run stays continuous and
  *                                    duplicate-free; one undo step for
  *                                    insert + shift together)
- *   MK  Backspace/Delete at a   → an ORDERED prefix under Backspace
- *      list-prefix boundary        (v1.13) retires the whole ITEM: a
- *                                    non-first member JOINS the line
- *                                    above (\`1. one / 2. two\` →
- *                                    \`1. onetwo\`, the members below
- *                                    re-anchored to close the gap); the
- *                                    run's FIRST member DETACHES (only
- *                                    the marker dies, the line turns
- *                                    plain, and the members below
- *                                    re-anchor at the freed number —
- *                                    \`1. 2. 3.\` → plain + \`1. 2.\`).
- *                                    Everything else keeps the atomic
- *                                    prefix: \`- \` (dash + space; the
- *                                    indent excluded) dies as one unit —
- *                                    Backspace right AFTER it, Delete
- *                                    right BEFORE it (ordered markers
- *                                    keep the atomic Delete) — one
- *                                    stroke, one undo step; any visual
- *                                    line, fences excluded, everything
- *                                    else native per-character
- *   LS  ←/→ at a list marker     → the atomic marker TRAVELS whole too
+ *   MK  Backspace/Delete at a   → the list atom is ONE unit — indent,
+ *      list-atom boundary         digits/dot/space, or indent/dash/
+ *                                    space (v2.8 folded the indent
+ *                                    in, the day the grammar started
+ *                                    nesting at any depth): Delete
+ *                                    right BEFORE it (at the line
+ *                                    head) removes the whole thing
+ *                                    in one stroke — the indent can
+ *                                    never be eaten char by char —
+ *                                    and Backspace right AFTER it is
+ *                                    the LEVEL LADDER's gesture (see
+ *                                    LL): one stroke, one undo step;
+ *                                    any visual line, fences
+ *                                    excluded, everything else native
+ *                                    per-character
+ *   LL  Tab / Shift+Tab /        → the list LEVEL LADDER (v2.8):
+ *      Backspace after the atom    with the collapsed caret anywhere
+ *                                    on an ordered/bullet item line
+ *                                    (content included), Tab sinks
+ *                                    the item one level (indent
+ *                                    +2 spaces) and Shift+Tab or
+ *                                    Backspace-at-the-atom-end lifts
+ *                                    it — and the move carries the
+ *                                    item's WHOLE SUBTREE (every
+ *                                    deeper line below, recursion
+ *                                    included) in ONE discrete
+ *                                    update. A top-level item lifting
+ *                                    further UNLISTS: the atom dies,
+ *                                    the content stays as plain
+ *                                    text, the subtree still rises
+ *                                    one level. SINKING IS CAPPED
+ *                                    (v2.9): an item may sit at most
+ *                                    ONE level below its parent
+ *                                    context — the nearest item line
+ *                                    above, plain lines skipped,
+ *                                    blanks/fences ending the block —
+ *                                    so a Tab past that (including
+ *                                    any Tab on a list's FIRST item)
+ *                                    still claims the key but moves
+ *                                    nothing (focus never jumps away
+ *                                    mid-list-editing). The subtree
+ *                                    walk stops at a fence region, a
+ *                                    blank line, or a sibling (a
+ *                                    line at/below the item's own
+ *                                    indent); fenced bytes never
+ *                                    shift. The ordered runs the move
+ *                                    reshuffles converge on the
+ *                                    renumber invariant by the next
+ *                                    restyle pass (a plain line left
+ *                                    behind by an unlist splits the
+ *                                    run — the tail restarts at 1).
+ *                                    This REPLACES the v1.13 join/
+ *                                    detach Backspace. Anywhere else
+ *                                    (plain lines, fences, range
+ *                                    selections, repeats, modifier
+ *                                    chords) is not ours: Tab keeps
+ *                                    DSH's native behavior untouched
+ *   LS  ←/→ at a list atom      → the atomic atom TRAVELS whole too
  *      (v2.2)                       (plain arrows only): → hops from the
- *                                    line head clear over \`1. \` / \`- \`
- *                                    to the content head, ← hops back; a
- *                                    caret that landed inside a marker (a
+ *                                    line head clear over \`␣␣1. \` /
+ *                                    \`␣␣- \` (indent included) to the
+ *                                    content head, ← hops back; a
+ *                                    caret that landed inside an atom (a
  *                                    click) exits to the far edge — the
  *                                    interior is never walked. The marker
  *                                    glyphs also RENDER distinct (edit
@@ -150,6 +188,15 @@ const PROLOGUE = `\
  *                                    caret-less and dead); the caret after
  *                                    any partial erase parks on the first
  *                                    NON-empty leaf, never on a husk.
+ *      (v2.8)                       The atom grew a head: the leading
+ *                                    INDENT is interior now too (the
+ *                                    grammar nests at any depth), so
+ *                                    no arrow ever steps into the
+ *                                    indent spaces, a stray caret
+ *                                    there is homed out like any other
+ *                                    interior position, and Delete at
+ *                                    the line head eats indent+marker
+ *                                    in one stroke.
  *      (v2.4)                       The bullet atom renders as ONE whole
  *                                    unit: the trailing space after \`-\`
  *                                    /\`*\` joins the "•" dot in the
@@ -275,9 +322,14 @@ const PROLOGUE = `\
  * A Shift+Enter that matches no plan passes through to the native soft
  * line break; Enter / Ctrl+Enter / Alt variants are never intercepted.
  * Backspace/Delete pass through untouched unless the collapsed caret
- * sits exactly on a list-prefix boundary (MK — the atomic bullet/unit
- * delete, or the ordered join/detach of v1.13) or a fence-box boundary
- * (R5's atomic delete) — plain, unmodified keys only.
+ * sits exactly on a list-atom boundary (MK — the atomic unit delete;
+ * LL — Backspace right after the atom lifts one ladder rung) or a
+ * fence-box boundary (R5's atomic delete) — plain, unmodified keys
+ * only. Tab/Shift+Tab pass through unless the caret's line is a list
+ * item (LL); a modifier chord is never ours, and held repeats re-plan
+ * like any press (a held Tab sinks once and holds at the cap, claimed
+ * and inert — passing repeats through would let the native default
+ * move focus out of the composer mid-edit).
  * Everything here is edit-state only: text content is never rewritten by
  * the styling pass, and the inserted prefixes are exactly the literal
  * markdown the user would have typed — save ONE deliberate exception:
@@ -380,9 +432,9 @@ const PROLOGUE = `\
  *   src/client/enter-plan.js   pure Shift+Enter arbitration (one
  *                              decision tree: fences, then lists)
  *   src/client/list-plan.js    pure list planning (the state-driven
- *                              renumber walk, marker glyphs, atomic
- *                              delete/hop/caret-home, join/detach,
- *                              shift-down, reanchor)
+ *                              renumber walk, marker glyphs, atom
+ *                              geometry + atomic delete/hop/caret-home,
+ *                              the level ladder, shift-down)
  *   src/client/analysis.js     ONE analyzeDraft(texts): the model plus
  *                              every domain projection, assembled once
  *                              per pass (the v2 code re-derived fences

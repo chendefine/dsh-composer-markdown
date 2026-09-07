@@ -85,30 +85,6 @@
     }
 
     /**
-     * Remove the soft-line separator at one flat offset — a LineBreak
-     * leaf whole, or a literal '\n' spliced out of its text leaf.
-     * @param {Block} block - a FRESH block view (re-read after any
-     *   prior erases, so leaf geometry is current).
-     * @param {number} offset - flat offset of the separator.
-     */
-    function removeSeparatorAt(block, offset) {
-      let flat = 0;
-      for (const leaf of block.leaves) {
-        const s = flat;
-        const e = flat + leaf.text.length;
-        flat = e;
-        if (offset < s || offset >= e) continue;
-        if (leaf.kind === 'br') {
-          leaf.node.remove?.();
-        } else if (leaf.kind === 'text'
-          && leaf.text.charCodeAt(offset - s) === 10) {
-          leaf.node.spliceText(offset - s, 1, '', false);
-        }
-        return;
-      }
-    }
-
-    /**
      * Place the collapsed caret at a flat char offset of one block, on
      * the first NON-EMPTY text leaf the offset reaches — the walk
      * selects a leaf while `offset < leafEnd`, so a position exactly
@@ -368,50 +344,109 @@
     }
 
     /**
-     * Join one ordered item into the soft line directly above it
-     * (marker Backspace on a non-first member, previous line inside the
-     * SAME paragraph): erase the marker, then remove the '\n' that
-     * separated the lines — a LineBreak leaf whole, a literal newline
-     * spliced out of its text leaf — so the content rides up against
-     * the previous line's end, byte-identical on both sides. The caret
-     * rests at the join point (the offset the '\n' occupied).
-     * @param {Block} block - the caret block.
-     * @param {{start: number, prefix: string, nlOffset: number}} plan -
-     *   the join plan's marker range and separator offset.
-     */
-    function joinSoftLineAbove(block, plan) {
-      eraseFlatRange(block, plan.start, plan.start + plan.prefix.length);
-      removeSeparatorAt(makeBlock(block.node), plan.nlOffset);
-      placeFlatCaret(block.node, plan.nlOffset);
-    }
-
-    /**
-     * Join one ordered item paragraph into the paragraph above it
-     * (marker Backspace on a non-first member living at its own
-     * paragraph head): erase the marker, move every remaining child of
-     * the item paragraph to the previous paragraph's end (order kept),
-     * then remove the emptied paragraph. An empty item simply
-     * disappears. The caret rests at the join point — the previous
-     * block's original text length, the boundary its last char and the
-     * moved tail share.
+     * Apply one planListLevelShift plan (the level ladder, v2.8):
+     * per touched visual line, insert or remove the LEVEL_STEP run at
+     * the line's flat head — the item line AND its whole subtree, in
+     * ONE update (one Ctrl+Z reverts the ladder move as a whole).
+     *
+     * Edits are applied RIGHT-TO-LEFT over (block index, flat offset)
+     * so a splice never shifts the range of an edit still to come;
+     * each edit re-reads its block's leaves, so any leaf
+     * fragmentation (the shape stage isolates marker glyphs into
+     * single-char leaves) is walked as it stands. A removal splices
+     * every text leaf its span touches (a chip/br inside the span —
+     * impossible for a line's leading spaces, but guarded against
+     * anyway — aborts just that edit); an insertion goes into the first
+     * non-empty text leaf the offset reaches, falling back to the
+     * last non-empty leaf's end. Every splice shifts the LIVE
+     * selection points across it (same riding rule as
+     * applyDigitRenames).
+     *
+     * The caret then parks at the plan's mapped offset on the item's
+     * block — with the consumeFlatRange safety net: an unlisted BARE
+     * marker empties its whole block, and empty husk leaves cannot
+     * carry a DOM-reachable selection, so the block resets to the
+     * pristine childless paragraph instead.
+     * @param {object} editor - the live editor.
      * @param {Block[]} blocks - the blocks read at plan time.
-     * @param {number} index - the item's block index (≥ 1).
-     * @param {{start: number, prefix: string}} plan - the join plan's
-     *   marker range.
+     * @param {{kind: string, edits: {index: number, at: number,
+     *   remove: number, insert: string}[], caret: {index: number,
+     *   offset: number}}} plan - the planListLevelShift plan.
      */
-    function joinParagraphAbove(blocks, index, plan) {
-      const block = blocks[index];
-      const prev = blocks[index - 1];
-      if (block === undefined || prev === undefined) return;
-      eraseFlatRange(block, plan.start, plan.start + plan.prefix.length);
-      let mover = block.node.getFirstChild?.();
-      while (mover != null) {
-        const next = mover.getNextSibling();
-        prev.node.append(mover);
-        mover = next;
+    function applyLevelEdits(editor, blocks, plan) {
+      if (plan.edits.length === 0) return; // a capped/noop plan: nothing to touch
+      const selection = liveSelectionOf(editor);
+      // Unique by identity: a stubbed (or aliased) collapsed caret must
+      // shift once, not once per endpoint.
+      const points = selection != null && selection.anchor != null && selection.focus != null
+        ? [...new Set([selection.anchor, selection.focus])]
+        : [];
+      const ordered = [...plan.edits].sort((a, b) => (b.index - a.index) || (b.at - a.at));
+      for (const edit of ordered) {
+        const block = blocks[edit.index];
+        if (block === undefined) continue;
+        if (edit.remove > 0) {
+          let offset = 0;
+          const overlapping = [];
+          let safe = true;
+          for (const leaf of makeBlock(block.node).leaves) {
+            const start = offset;
+            const end = offset + leaf.text.length;
+            offset = end;
+            if (end <= edit.at || start >= edit.at + edit.remove) continue;
+            if (leaf.kind !== 'text' || leaf.text === '') {
+              safe = false; // a chip/br inside the span: do not touch
+              break;
+            }
+            overlapping.push({
+              node: leaf.node,
+              from: Math.max(start, edit.at) - start,
+              to: Math.min(end, edit.at + edit.remove) - start,
+            });
+          }
+          if (!safe || overlapping.length === 0) continue;
+          for (const { node, from, to } of overlapping) {
+            const key = node.getKey();
+            node.spliceText(from, to - from, '', false);
+            for (const point of points) {
+              shiftPointOverSplice(point, key, from, to, 0);
+            }
+          }
+        } else if (edit.insert.length > 0) {
+          let lastText = null;
+          let target = null;
+          let flat = 0;
+          for (const leaf of makeBlock(block.node).leaves) {
+            const start = flat;
+            const end = flat + leaf.text.length;
+            flat = end;
+            if (leaf.kind !== 'text' || leaf.text === '') continue;
+            lastText = { node: leaf.node, len: leaf.text.length };
+            if (target === null && end >= edit.at) {
+              target = { node: leaf.node, from: Math.max(0, edit.at - start) };
+            }
+          }
+          const pick = target ?? (lastText !== null
+            ? { node: lastText.node, from: lastText.len }
+            : null);
+          if (pick === null) continue; // nothing text-ish to splice into
+          const key = pick.node.getKey();
+          pick.node.spliceText(pick.from, 0, edit.insert, false);
+          for (const point of points) {
+            shiftPointOverSplice(point, key, pick.from, pick.from, edit.insert.length);
+          }
+        }
       }
-      block.node.remove?.();
-      placeFlatCaret(prev.node, prev.text.length);
+      const block = blocks[plan.caret.index];
+      if (block === undefined) return;
+      if (makeBlock(block.node).text === '') {
+        // The reset rule of consumeFlatRange: a bare marker unlisted
+        // leaves only husk leaves — strip them, element-select.
+        for (const leaf of makeBlock(block.node).leaves) leaf.node.remove?.();
+        if (typeof block.node.selectStart === 'function') block.node.selectStart();
+        return;
+      }
+      placeFlatCaret(block.node, plan.caret.offset);
     }
 
     /**
@@ -784,15 +819,13 @@
     module.exports = {
       eraseFlatRange,
       consumeFlatRange,
-      removeSeparatorAt,
       placeFlatCaret,
       shiftPointOverSplice,
       applyDigitRenames,
+      applyLevelEdits,
       newParagraphAfter,
       splitTailToNewParagraph,
       insertSoftContinuation,
-      joinSoftLineAbove,
-      joinParagraphAbove,
       removeBlockKeys,
       applyEnterPlan,
       applyFenceKeyPlan,

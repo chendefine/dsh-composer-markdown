@@ -23,19 +23,18 @@
     const { computeEnterPlan } = require('./enter-plan');
     const { planFenceKey } = require('./fence-plan');
     const {
+      listItemAtomOf,
+      planListLevelShift,
       planListMarkerDelete,
       planListMarkerHop,
       planListShiftDown,
-      planListBackspace,
-      planListReanchor,
     } = require('./list-plan');
     const {
       applyEnterPlan,
       applyFenceKeyPlan,
       applyDigitRenames,
+      applyLevelEdits,
       consumeFlatRange,
-      joinSoftLineAbove,
-      joinParagraphAbove,
       placeFlatCaret,
     } = require('./edits');
 
@@ -151,10 +150,11 @@
     /**
      * Backspace / Delete / arrows with a plain collapsed caret: the
      * atomic gestures. The chain is ordered — fence box first, then
-     * (delete keys only) the ordered marker Backspace (join/detach),
-     * then the atomic marker delete, and (horizontal arrows only) the
-     * atomic marker hop — and the first non-null plan wins; everything
-     * else keeps the native key.
+     * (delete keys only) the LEVEL LADDER lift (Backspace right after
+     * a list atom: a nested item rises one level, a top-level one
+     * leaves the list), then the atomic atom delete, and (horizontal
+     * arrows only) the atomic atom hop — and the first non-null plan
+     * wins; everything else keeps the native key.
      */
     const atomicGesture = {
       keys: new Set([
@@ -178,15 +178,23 @@
         if (fence !== null) return { kind: 'fence', plan: fence, blocks };
         if (key === 'Backspace' || key === 'Delete') {
           const caret = caretBlockPoint(editor, blocks);
-          if (key === 'Backspace') {
-            const join = planListBackspace(model, caret);
-            if (join !== null) return { kind: 'join', plan: join, blocks };
+          if (key === 'Backspace' && caret !== null) {
+            // Backspace right AFTER the list atom (the content head):
+            // one rung up the level ladder — a nested item sheds a
+            // LEVEL_STEP of indent (subtree riding along), a
+            // top-level item leaves the list (the atom dies, the
+            // content stays as plain text).
+            const atom = listItemAtomOf(model, caret);
+            if (atom !== null && caret.offset === atom.end) {
+              const lift = planListLevelShift(model, caret, 'shallower');
+              if (lift !== null) return { kind: 'level', plan: lift, blocks };
+            }
           }
           const marker = planListMarkerDelete(model, caret, key);
           if (marker !== null) return { kind: 'marker', plan: marker, blocks };
         }
         if (key === 'ArrowLeft' || key === 'ArrowRight') {
-          // The marker that deletes as one unit travels as one unit:
+          // The atom that deletes as one unit travels as one unit:
           // ←/→ hop over it instead of stepping through its interior.
           const hop = planListMarkerHop(model, caretBlockPoint(editor, blocks), key);
           if (hop !== null) return { kind: 'hop', plan: hop, blocks };
@@ -203,49 +211,81 @@
           if (block !== undefined) placeFlatCaret(block.node, plan.offset);
           return;
         }
-        const block = blocks[plan.index];
-        if (kind === 'marker') {
-          if (block !== undefined) {
-            consumeFlatRange(editor, block, plan.start, plan.start + plan.prefix.length);
-          }
+        if (kind === 'level') {
+          // The ladder move is ONE update (subtree + caret); the
+          // ordered-run renumbering it reshuffles converges on the
+          // next restyle pass, history-merged into this undo step's
+          // neighbourhood.
+          applyLevelEdits(editor, blocks, plan);
           return;
         }
-        // Ordered marker Backspace: JOIN the item into the line
-        // above (non-first member) or DETACH the marker (first
-        // member, the line turns plain).
-        if (plan.kind === 'join') {
-          if (plan.sameBlock) {
-            if (block !== undefined) joinSoftLineAbove(block, plan);
-          } else {
-            joinParagraphAbove(blocks, plan.index, plan);
-          }
-        } else if (block !== undefined) {
+        const block = blocks[plan.index];
+        if (block !== undefined) {
           consumeFlatRange(editor, block, plan.start, plan.start + plan.prefix.length);
         }
-        // The retired item's number frees up: re-anchor every member
-        // below in the same run (join → previous number + 1; detach
-        // → the freed number). Same update — one Ctrl+Z reverts the
-        // join/detach and the renumber together.
-        const fresh = readBlocks(editor);
-        const point = caretBlockPoint(editor, fresh);
-        const edits = point === null
-          ? []
-          : planListReanchor(visualModelOf(fresh.map((b) => b.text)), point, plan.indent, plan.seed);
-        if (edits.length > 0) applyDigitRenames(editor, fresh, edits);
       },
       history({ kind, plan }) {
-        // Whole-box unwraps / joins / markers get their own undo step
-        // (one Ctrl+Z restores the markers); arrow moves (fence skips,
-        // marker hops) are selection-only and merge into adjacent
-        // history.
+        // Whole-box unwraps / atoms / ladder moves get their own undo
+        // step (one Ctrl+Z restores the markers or the level); arrow
+        // moves (fence skips, atom hops) are selection-only and merge
+        // into adjacent history.
         return (kind === 'fence' && plan.kind !== 'fence-unwrap') || kind === 'hop'
           ? { tag: HISTORY_MERGE_TAG }
           : { discrete: true };
       },
     };
 
+    /**
+     * Tab / Shift+Tab: the list LEVEL LADDER (v2.8). With the
+     * collapsed caret anywhere on an ordered/bullet item line —
+     * content included — Tab sinks the item one level (indent
+     * +LEVEL_STEP) and Shift+Tab or Backspace-at-the-atom-end lifts
+     * it — and the move carries the item's WHOLE SUBTREE (every
+     * deeper line below, recursion included) in ONE discrete update.
+     * A top-level item lifting further UNLISTS: the atom dies, the
+     * content stays as plain text, the subtree still rises one level.
+     *
+     * Sinking is CAPPED (v2.9): an item may sit at most one level
+     * below its parent context (the nearest item above; blanks and
+     * fences end the block), so a Tab that would exceed that —
+     * including any Tab on a list's first item — still CLAIMS the key
+     * (Tab on a list line is always the ladder's) but moves nothing:
+     * focus never jumps away mid-list-editing. That holds for HELD
+     * keys too: repeats re-plan like any press (a held Tab sinks once
+     * and then holds at the cap, claimed and inert; a held Shift+Tab
+     * climbs one rung per repeat until the unlist) — were repeats
+     * passed through instead, the native default would move focus out
+     * of the composer mid-edit. Anywhere else (plain lines, fence
+     * interiors, range selections, modifier chords) is not ours: Tab
+     * keeps DSH's native behavior (trigger-menu completion while a
+     * menu is open — guarded earlier — and browser focus traversal
+     * otherwise), untouched.
+     */
+    const indentGesture = {
+      keys: new Set(['Tab']),
+      guard(event) {
+        return !event.ctrlKey && !event.metaKey && !event.altKey;
+      },
+      prepare(event, editor) {
+        const blocks = readBlocks(editor);
+        if (caretPoint(editor, blocks) === null) return null; // collapsed only
+        const caret = caretBlockPoint(editor, blocks);
+        if (caret === null) return null;
+        const model = visualModelOf(blocks.map((b) => b.text));
+        const plan = planListLevelShift(model, caret, event.shiftKey ? 'shallower' : 'deeper');
+        return plan === null ? null : { kind: 'level', plan, blocks };
+      },
+      apply({ plan, blocks }, editor) {
+        if (plan.kind === 'noop') return; // capped: claimed, nothing moves
+        applyLevelEdits(editor, blocks, plan);
+      },
+      history() {
+        return { discrete: true };
+      },
+    };
+
     /** The gesture policy table, in arbitration order. */
-    const GESTURES = [enterGesture, atomicGesture];
+    const GESTURES = [enterGesture, atomicGesture, indentGesture];
 
     /**
      * Bind the key surface to a wiring hook (the restyle engine's

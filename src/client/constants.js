@@ -26,20 +26,23 @@
     /** Self-triggered restyle writes allowed per rolling second (loop guard). */
     const MAX_WRITES_PER_SECOND = 16;
 
-    /** Non-empty bullet item line: `- x` / `* x`, indent ≤ 3 spaces. */
-    const BULLET_RE = /^(\s{0,3})([-*]) \S/;
-    /** Non-empty ordered item line: `1. x` … `999999999. x`. */
-    const NUMBER_RE = /^(\s{0,3})(\d{1,9})\. \S/;
+    /** Spaces of indent one nesting level adds/removes (the Tab ladder). */
+    const LEVEL_STEP = 2;
+
+    /** Non-empty bullet item line: `- x` / `* x`, any indent (nesting, v2.8). */
+    const BULLET_RE = /^(\s*)([-*]) \S/;
+    /** Non-empty ordered item line: `1. x` … `999999999. x`, any indent. */
+    const NUMBER_RE = /^(\s*)(\d{1,9})\. \S/;
     /** Bullet prefix with no content (Enter here exits the list). */
-    const EMPTY_BULLET_RE = /^(\s{0,3})([-*]) $/;
+    const EMPTY_BULLET_RE = /^(\s*)([-*]) $/;
     /** Ordered prefix with no content (Enter here exits the list). */
-    const EMPTY_NUMBER_RE = /^(\s{0,3})(\d{1,9})\. $/;
+    const EMPTY_NUMBER_RE = /^(\s*)(\d{1,9})\. $/;
     /** Any ordered item line — with content or a bare prefix — used to
      *  group a list for renumbering (content may also be empty). */
-    const ORDERED_ITEM_RE = /^(\s{0,3})(\d{1,9})\. (?=\S|$)/;
+    const ORDERED_ITEM_RE = /^(\s*)(\d{1,9})\. (?=\S|$)/;
     /** Any bullet item line — with content or a bare prefix — used for
      *  the atomic marker delete (the marker dies as one unit). */
-    const BULLET_ITEM_RE = /^(\s{0,3})([-*]) (?=\S|$)/;
+    const BULLET_ITEM_RE = /^(\s*)([-*]) (?=\S|$)/;
     /** A continuation marker that carries an ordered number (`2. `). */
     const ORDERED_MARKER_RE = /^\d{1,9}\. $/;
     /** Any fence-marker line (``` at paragraph start, CommonMark indent ≤ 3). */
@@ -77,6 +80,7 @@
       IME_KEYCODE,
       RECENT_COMPOSITION_MS,
       MAX_WRITES_PER_SECOND,
+      LEVEL_STEP,
       BULLET_RE,
       NUMBER_RE,
       EMPTY_BULLET_RE,
