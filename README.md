@@ -62,6 +62,7 @@ By domain:
 ### Prerequisites
 
 - DSH `0.1.2-alpha.x` (the composer is a Lexical plain-text editor + `@lexical/plain-text`, lexical `0.49`);
+- Node.js `^22.19.0 || >=24.0.0` — the same window DSH itself requires; the package's `engines` field mirrors it;
 - a modern desktop browser (Chrome / Edge / Firefox / Safari).
 
 ### Installing the plugin

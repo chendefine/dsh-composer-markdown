@@ -22,7 +22,7 @@
  *   node scripts/build.mjs          regenerate client.js (write + report)
  *   node scripts/build.mjs --check  exit 1 when client.js is stale
  *
- * Zero dependencies; node >= 18.
+ * Zero dependencies; node ^22.19 || >=24 (DSH's support window).
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
