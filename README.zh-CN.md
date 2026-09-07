@@ -1,6 +1,8 @@
 # dsh-composer-markdown
 
-[English](./README.md)
+[English](./README.md) · [npm](https://www.npmjs.com/package/dsh-composer-markdown) · [GitHub](https://github.com/chendefine/dsh-composer-markdown)
+
+![npm](https://img.shields.io/npm/v/dsh-composer-markdown) ![license](https://img.shields.io/npm/l/dsh-composer-markdown) ![node](https://img.shields.io/node/v/dsh-composer-markdown) ![CI](https://img.shields.io/github/actions/workflow/status/chendefine/dsh-composer-markdown/ci.yml) ![stars](https://img.shields.io/github/stars/chendefine/dsh-composer-markdown)
 
 > **一句话简介**：DSH（DeepSeek Harness）Web 纯客户端插件，为对话输入框（composer）提供 Markdown 编辑增强 —— 列表自动续行与序号规整、行内代码样式（反引号渲染后隐藏）、代码块围栏自动闭合与原子化交互。所有编辑手势做在 **Shift+Enter** 上；**Enter 保持 DSH 原生「直接发送」语义，从不拦截**。除「有序列表序号规整」外一切只作用于编辑态视觉与按键，**发送文本始终保持字面 Markdown、逐字节保真**。
 
@@ -72,11 +74,19 @@ DSH 的 composer 是一个 Lexical 纯文本编辑器，原生只提供「Enter 
 dsh plugin --profile web add link:/absolute/path/to/dsh-composer-markdown
 ```
 
-从 npm registry（发布后）：
+从 npm registry：
 
 ```sh
 dsh plugin --profile web add dsh-composer-markdown
 ```
+
+从 GitHub（构建产物 `client.js` 随仓库提交，即使 pnpm 跳过 `prepare` 构建脚本插件也能正常加载；建议用 `#<sha>` 固定 commit，避免后续 push 改变实际运行的代码）：
+
+```sh
+dsh plugin --profile web add github:chendefine/dsh-composer-markdown
+```
+
+> pnpm ≥ 10 会在用户显式放行前阻塞 git 依赖的 `prepare` 脚本。若希望安装时从 `src/client/` 重新构建 `client.js`，请把 pnpm 打印的键（如 `dsh-composer-markdown: true`）加进 profile 的 `pnpm-workspace.yaml` 的 `allowBuilds` 下再重新 `add` —— 这一步等于授权该包在你机器上于安装期执行代码，请仅放行信任的源。
 
 或经 DSH 插件市场（设置 → DSH 插件市场）—— 给仓库打上 `dsh-plugin` topic 即被自动收录。
 

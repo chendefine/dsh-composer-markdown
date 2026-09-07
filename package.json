@@ -5,11 +5,25 @@
   "type": "module",
   "main": "./index.js",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chendefine/dsh-composer-markdown.git"
+  },
+  "homepage": "https://github.com/chendefine/dsh-composer-markdown#readme",
+  "bugs": {
+    "url": "https://github.com/chendefine/dsh-composer-markdown/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=18"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:check": "node scripts/build.mjs --check",
+    "prepare": "node scripts/build.mjs",
+    "prepublishOnly": "node scripts/build.mjs && node tests/run-tests.mjs",
     "test": "node tests/run-tests.mjs"
   },
   "keywords": [

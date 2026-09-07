@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # The package declares engines ">=18" and is zero-dependency, so the
+        # matrix covers the whole declared range (the plugin itself runs in
+        # the browser; only the host entry, build, and tests execute on node).
+        node-version: [18, 20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      # Zero runtime/dev dependencies — no install step; npm run executes
+      # straight from the checkout. (Suites: bundle freshness + pure-logic
+      # unit tests + bundle-shape assertions; the DSH host-contract smoke
+      # is opt-in via DSH_CHECKOUT and stays skipped here.)
+      - name: Test
+        run: npm test
+
+      - name: Regenerate client.js
+        run: npm run build
+
+      - name: Verify the committed artifact is fresh
+        run: git diff --exit-code -- client.js
+
+      - name: Verify package contents
+        run: |
+          npm pack --pack-destination /tmp/dsh-composer-markdown-pack
+          tar -tzf /tmp/dsh-composer-markdown-pack/*.tgz > /tmp/pack-list.txt
+          grep -q '^package/index.js$' /tmp/pack-list.txt || (echo 'index.js missing from package' && exit 1)
+          grep -q '^package/client.js$' /tmp/pack-list.txt || (echo 'client.js missing from package' && exit 1)
+          grep -q '^package/cordis.patch.yml$' /tmp/pack-list.txt || (echo 'cordis.patch.yml missing from package' && exit 1)
+          grep -q '^package/package.json$' /tmp/pack-list.txt || (echo 'package.json missing from package' && exit 1)
+          grep -q '^package/LICENSE$' /tmp/pack-list.txt || (echo 'LICENSE missing from package' && exit 1)
+          # the dsh.bundle manifest keys must survive packaging for the
+          # installer to recognize this as a DSH bundle
+          node -e "
+            const fs = require('node:fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            if (pkg.dsh?.bundle?.patch !== './cordis.patch.yml') {
+              console.error('dsh.bundle.patch manifest missing or wrong'); process.exit(1);
+            }
+            console.log('dsh.bundle manifest OK');
+          "

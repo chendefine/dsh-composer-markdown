@@ -1,6 +1,8 @@
 # dsh-composer-markdown
 
-[中文](./README.zh-CN.md)
+[中文](./README.zh-CN.md) · [npm](https://www.npmjs.com/package/dsh-composer-markdown) · [GitHub](https://github.com/chendefine/dsh-composer-markdown)
+
+![npm](https://img.shields.io/npm/v/dsh-composer-markdown) ![license](https://img.shields.io/npm/l/dsh-composer-markdown) ![node](https://img.shields.io/node/v/dsh-composer-markdown) ![CI](https://img.shields.io/github/actions/workflow/status/chendefine/dsh-composer-markdown/ci.yml) ![stars](https://img.shields.io/github/stars/chendefine/dsh-composer-markdown)
 
 > **In one sentence**: a pure client-side plugin for DSH (DeepSeek Harness) Web that adds Markdown editing aids to the conversation composer — list auto-continuation and renumbering, inline-code styling (backticks hidden once rendered), and code-fence auto-closing with atomic block interactions. Every editing gesture rides on **Shift+Enter**; **Enter keeps DSH's native "submit" semantics and is never intercepted**. Apart from the ordered-list renumbering, everything is edit-state visuals and key gestures only — **the submitted text always stays literal Markdown, byte-for-byte faithful**.
 
@@ -72,11 +74,19 @@ From a local checkout (the usual development route):
 dsh plugin --profile web add link:/absolute/path/to/dsh-composer-markdown
 ```
 
-From the npm registry (once published):
+From the npm registry:
 
 ```sh
 dsh plugin --profile web add dsh-composer-markdown
 ```
+
+From GitHub (the built `client.js` is committed, so the plugin loads even when pnpm skips the `prepare` build script; pin a commit with `#<sha>` so a later push cannot change what you run):
+
+```sh
+dsh plugin --profile web add github:chendefine/dsh-composer-markdown
+```
+
+> pnpm ≥ 10 blocks a git dependency's `prepare` script until allowed. If you want the install to rebuild `client.js` from `src/client/`, add the key pnpm prints (e.g. `dsh-composer-markdown: true`) under `allowBuilds` in the profile's `pnpm-workspace.yaml` and re-run the `add` — treat it as permission to run the package's code on your machine at install time.
 
 Or through the DSH plugin marketplace (设置 → DSH插件市场) — tag the repo with the `dsh-plugin` topic and it is indexed automatically.
 
