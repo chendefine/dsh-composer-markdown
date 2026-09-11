@@ -317,7 +317,18 @@ const PROLOGUE = `\
  *                                    making \`\`\` at the head of ANY line —
  *                                    not just paragraph heads — open a
  *                                    block.
- *   E2  empty \`- \` + Shift+Enter → prefix removed, empty paragraph kept
+ *   E2  empty \`- \` + Shift+Enter → prefix removed, empty paragraph kept,
+ *                                    caret stays ON that kept line — a soft
+ *                                    exit keeps the emptied visual line and
+ *                                    element-selects right after its break,
+ *                                    wherever the item sat (trailing, mid-
+ *                                    paragraph between items, or the block's
+ *                                    first line); never rolled onto the
+ *                                    previous item's end nor clamped onto
+ *                                    the next item's first leaf. The ladder
+ *                                    unlist (Shift+Tab / Backspace at the
+ *                                    atom) parks the caret on the same
+ *                                    emptied line through the same rule
  *
  * A Shift+Enter that matches no plan passes through to the native soft
  * line break; Enter / Ctrl+Enter / Alt variants are never intercepted.

@@ -266,7 +266,18 @@
  *                                    making ``` at the head of ANY line —
  *                                    not just paragraph heads — open a
  *                                    block.
- *   E2  empty `- ` + Shift+Enter → prefix removed, empty paragraph kept
+ *   E2  empty `- ` + Shift+Enter → prefix removed, empty paragraph kept,
+ *                                    caret stays ON that kept line — a soft
+ *                                    exit keeps the emptied visual line and
+ *                                    element-selects right after its break,
+ *                                    wherever the item sat (trailing, mid-
+ *                                    paragraph between items, or the block's
+ *                                    first line); never rolled onto the
+ *                                    previous item's end nor clamped onto
+ *                                    the next item's first leaf. The ladder
+ *                                    unlist (Shift+Tab / Backspace at the
+ *                                    atom) parks the caret on the same
+ *                                    emptied line through the same rule
  *
  * A Shift+Enter that matches no plan passes through to the native soft
  * line break; Enter / Ctrl+Enter / Alt variants are never intercepted.
@@ -2543,10 +2554,12 @@ window.__ModuleLoader__.load({
      * The caret NEVER rests on an emptied text leaf: a text selection
      * anchored in a zero-length leaf cannot reach the DOM (the leaf's
      * element holds no text node, so Lexical's DOM-selection apply
-     * bails) and the composer goes caret-less and dead. Two guards:
-     * the erase emptied the WHOLE block (a marker-only line — the
-     * unmergeable glyph husks would strand there forever) → strip the
-     * leftover leaves and reset the paragraph to the pristine
+     * bails) and the composer goes caret-less and dead. Three guards:
+     * the erase EMPTIED leaves it touched (the glyph-isolated atoms
+     * splice into zero-length husks) → strip those husks first, so no
+     * caret target ever competes with a dead leaf and the block keeps
+     * none at all; the erase emptied the WHOLE block (a marker-only
+     * line — chips/linebreaks may remain) → reset the paragraph to the pristine
      * empty-paragraph shape (no children, an element selection —
      * exactly a fresh composer, typeable and DOM-selectable); anything
      * less → placeFlatCaret re-reads the block and picks the first
@@ -2559,6 +2572,16 @@ window.__ModuleLoader__.load({
     function consumeFlatRange(editor, block, start, end) {
       const hit = eraseFlatRange(block, start, end);
       if (hit === null) return; // nothing erased: leave the caret alone
+      // Zero-length text husks the erase left behind (a marker whose
+      // glyphs the shape stage isolated into single-char leaves splices
+      // into empty leaves): strip them right here — a husk can never
+      // carry a DOM-reachable selection, and one parked after a
+      // trailing linebreak would shadow the caret's target line (the
+      // empty visual line a soft empty-item exit just unmarked must
+      // stay addressable — see placeFlatCaret's after-break point).
+      for (const leaf of makeBlock(block.node).leaves) {
+        if (leaf.kind === 'text' && leaf.text === '') leaf.node.remove?.();
+      }
       const fresh = makeBlock(block.node);
       if (fresh.text === '') {
         for (const leaf of fresh.leaves) leaf.node.remove?.();
@@ -2569,33 +2592,85 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Place the collapsed caret at a flat char offset of one block, on
-     * the first NON-EMPTY text leaf the offset reaches — the walk
-     * selects a leaf while `offset < leafEnd`, so a position exactly
-     * AT a leaf boundary lands on the NEXT non-empty text leaf's
-     * start (the right leaf's start wins over the left leaf's end
-     * when both touch), and a position past every leaf falls back to
-     * the last non-empty text leaf's end. A fresh flatten walks the
-     * CURRENT children, so callers may mutate first and pass
-     * post-edit offsets. Chips cannot hold a caret; a boundary
-     * against a chip falls to the adjacent text leaf.
+     * Place the collapsed caret at a flat char offset of one block.
+     *
+     * LINE-HEAD POSITIONS COME FIRST (v3.2): a flat offset a '\n' leaf
+     * ends at — and offset 0 when the block OPENS on a '\n' — is the
+     * head of a visual line, most often the emptied list item an
+     * exit/unlist gesture just unmarked (mid-paragraph, trailing, or
+     * first). A linebreak cannot hold a text selection, so the caret
+     * takes the host's own representation of "collapsed at a <br>
+     * boundary": an ELEMENT selection on the paragraph right after
+     * the break child (exactly what Lexical's insertLineBreak lands
+     * for a native soft break). flatOffsetForKey maps it back to the
+     * same flat offset, and typing at it inserts after the break, ON
+     * that line. This MUST outrank the text walk below: an emptied
+     * line owns no text leaf, so the walk's forward clamp would step
+     * ACROSS the following break onto the NEXT line's first leaf —
+     * the caret "jumping a line" — or, at the tail, fall back onto
+     * the PREVIOUS line's last leaf. When the next line does carry
+     * text, its first leaf's start is the same position as the
+     * element point; the element point simply represents it as what
+     * it is, the head of the line the offset addressed. The parent
+     * check is by KEY: inside editor.update() getParent() answers
+     * with the pending state's writable clone, a different object
+     * carrying the same identity; a break that is not a DIRECT child
+     * is not addressable this way and keeps the defaults.
+     *
+     * Otherwise the caret rests on the first NON-EMPTY text leaf the
+     * offset reaches — the walk selects a leaf while `offset <
+     * leafEnd`, so a position exactly AT a leaf boundary lands on the
+     * NEXT non-empty text leaf's start (the right leaf's start wins
+     * over the left leaf's end when both touch), and a position past
+     * every text leaf falls back to the last non-empty text leaf's
+     * end. A fresh flatten walks the CURRENT children, so callers may
+     * mutate first and pass post-edit offsets. Chips cannot hold a
+     * caret either; a boundary against a chip falls to the adjacent
+     * text leaf.
      * @param {object} blockNode - the paragraph node.
      * @param {number} offset - flat char offset into its flattened text.
      */
     function placeFlatCaret(blockNode, offset) {
+      const leaves = makeBlock(blockNode).leaves;
+      const keyOf = (node) => (typeof node.getKey === 'function' ? node.getKey() : null);
+      const ownBreak = (leaf) => typeof leaf.node.getParent === 'function'
+        && typeof blockNode.getKey === 'function'
+        && keyOf(leaf.node.getParent()) === keyOf(blockNode)
+        && typeof blockNode.select === 'function';
       let lastText = null;
+      let inside = null; // first non-empty text leaf the offset reaches
+      let afterBreak = null; // a '\n' leaf ending exactly at the offset
       let flat = 0;
-      for (const leaf of makeBlock(blockNode).leaves) {
+      for (const leaf of leaves) {
         const start = flat;
         const end = flat + leaf.text.length;
         flat = end;
+        if (leaf.kind === 'br') {
+          if (end === offset) afterBreak = leaf; // a visual line starts here
+          continue;
+        }
         if (leaf.kind !== 'text' || leaf.text === '') continue;
-        if (offset < end) {
-          const at = Math.max(0, offset - start);
-          if (typeof leaf.node.select === 'function') leaf.node.select(at, at);
-          return;
+        if (inside === null && offset < end) {
+          inside = { node: leaf.node, at: Math.max(0, offset - start) };
         }
         lastText = { node: leaf.node, len: leaf.text.length };
+      }
+      if (afterBreak !== null && ownBreak(afterBreak)) {
+        // The element point right after the break: the caret stays on
+        // the line the '\n' opened, mid-paragraph and trailing alike.
+        const at = afterBreak.node.getIndexWithinParent() + 1;
+        blockNode.select(at, at);
+        return;
+      }
+      if (offset === 0 && leaves.length > 0 && leaves[0].kind === 'br' && ownBreak(leaves[0])) {
+        // The block OPENS on the emptied line (its item was the first
+        // line): the block head is that line's head.
+        blockNode.select(0, 0);
+        return;
+      }
+      if (inside !== null && typeof inside.node.select === 'function') {
+        inside.node.select(inside.at, inside.at);
+        return;
       }
       if (lastText !== null && typeof lastText.node.select === 'function') {
         lastText.node.select(lastText.len, lastText.len);
@@ -2923,6 +2998,13 @@ window.__ModuleLoader__.load({
       }
       const block = blocks[plan.caret.index];
       if (block === undefined) return;
+      // The husk hygiene of consumeFlatRange: an unlisted marker splices
+      // its glyph-isolated leaves to zero length, and the mapped caret
+      // offset then competes with dead leaves — strip them so the
+      // placement (an after-break point included) addresses live ones.
+      for (const leaf of makeBlock(block.node).leaves) {
+        if (leaf.kind === 'text' && leaf.text === '') leaf.node.remove?.();
+      }
       if (makeBlock(block.node).text === '') {
         // The reset rule of consumeFlatRange: a bare marker unlisted
         // leaves only husk leaves — strip them, element-select.

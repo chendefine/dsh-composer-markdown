@@ -1069,6 +1069,271 @@ if (I) {
     }
   }
 
+  console.log('· placeFlatCaret + consumeFlatRange (stub nodes)')
+  {
+    const place = I.placeFlatCaret
+    const consume = I.consumeFlatRange
+    // Lexical-shaped stubs: text nodes carry __text and splice in place;
+    // linebreaks read as '\n'; paragraphs flatten through getChildren
+    // (see makeBlock) and record element selections. Child order lives
+    // on the paragraph so remove() keeps getChildren() coherent.
+    const makeText = (key, text) => ({
+      key,
+      __text: text,
+      getTextContent() { return this.__text },
+      getKey() { return this.key },
+      getParent() { return this.__parent ?? null },
+      getIndexWithinParent() { return this.__parent.kids.indexOf(this) },
+      spliceText(offset, delCount, newText) {
+        this.__text = this.__text.slice(0, offset) + newText + this.__text.slice(offset + delCount)
+        return this
+      },
+      select(a) { selected = { key: this.key, offset: a, type: 'text' } },
+      remove() { this.__parent.kids = this.__parent.kids.filter((k) => k !== this) },
+    })
+    const makeBr = (key) => ({
+      key,
+      __type: 'linebreak',
+      getTextContent() { return '\n' },
+      getKey() { return this.key },
+      getParent() { return this.__parent ?? null },
+      getIndexWithinParent() { return this.__parent.kids.indexOf(this) },
+    })
+    const makePara = (kids) => {
+      const para = {
+        key: 'p1',
+        kids,
+        getChildren() { return this.kids },
+        getKey() { return this.key },
+        select(a) { selected = { key: this.key, offset: a, type: 'element' } },
+        selectStart() { selected = { key: this.key, offset: 0, type: 'element' } },
+        selectEnd() { selected = { key: this.key, offset: this.kids.length, type: 'element' } },
+      }
+      for (const kid of kids) kid.__parent = para
+      return para
+    }
+    const makeEditor = () => ({ getEditorState: () => ({ _selection: null }) })
+    const blockOf = (para) => {
+      const leaves = para.getChildren().map((k) => (k.__type === 'linebreak'
+        ? { kind: 'br', node: k, text: '\n' }
+        : { kind: 'text', node: k, text: k.getTextContent() }))
+      return { node: para, leaves, text: leaves.map((leaf) => leaf.text).join('') }
+    }
+    let selected = null
+
+    // ── placeFlatCaret: after a trailing soft break ──
+    // "abc\n" — offset 4 is the empty line the '\n' opened: the caret
+    // element-selects right AFTER the break (v3.1) instead of rolling
+    // back onto "abc"'s end.
+    {
+      selected = null
+      const para = makePara([makeText('t1', 'abc'), makeBr('b1')])
+      place(para, 4)
+      eq(selected, { key: 'p1', offset: 2, type: 'element' },
+        'offset past a trailing linebreak → element point after it (stays on the empty line)')
+    }
+    // The same flat offset with text following the break: the LINE HEAD
+    // rule takes the element point after the break (v3.2) — the same
+    // position that leaf's start addresses, held in the line-head form
+    // so an emptied line can never be clamped across.
+    {
+      selected = null
+      const para = makePara([makeText('t1', 'abc'), makeBr('b1'), makeText('t2', 'de')])
+      place(para, 4)
+      eq(selected, { key: 'p1', offset: 2, type: 'element' },
+        'offset at a line head with text after the break → the element point after the break (the same position, line-head form)')
+    }
+    // An EMPTY line between content — the mid-paragraph emptied item:
+    // the offset is the empty line's head (a break ends at it, another
+    // follows); the walk must NOT clamp onto the next line's "d" leaf.
+    {
+      selected = null
+      const para = makePara([makeText('t1', 'abc'), makeBr('b1'), makeBr('b2'), makeText('t2', 'd')])
+      place(para, 4)
+      eq(selected, { key: 'p1', offset: 2, type: 'element' },
+        'offset at an EMPTY mid-paragraph line head → element point between the breaks (stays on the empty line)')
+    }
+    // The block OPENS on a break: offset 0 is the emptied FIRST line's
+    // head — the block head, not the second line's first leaf.
+    {
+      selected = null
+      const para = makePara([makeBr('b1'), makeText('t1', 'next')])
+      place(para, 0)
+      eq(selected, { key: 'p1', offset: 0, type: 'element' },
+        'offset 0 with the block opening on a break → element point at the block head (first line stays addressable)')
+    }
+    // Offset at the last text leaf's END (still on its line, before the
+    // break): keeps the legacy text-end placement.
+    {
+      selected = null
+      const para = makePara([makeText('t1', 'abc'), makeBr('b1')])
+      place(para, 3)
+      eq(selected, { key: 't1', offset: 3, type: 'text' },
+        'offset at the last text end (before the break) → that leaf\'s end (unchanged)')
+    }
+    // Two trailing breaks: the caret follows the LAST one the offset
+    // passes ("abc\n\n" offset 4 → between them; offset 5 → past both).
+    {
+      selected = null
+      const para = makePara([makeText('t1', 'abc'), makeBr('b1'), makeBr('b2')])
+      place(para, 5)
+      eq(selected, { key: 'p1', offset: 3, type: 'element' },
+        'two trailing breaks: the element point lands after the one the offset passes')
+    }
+
+    // ── consumeFlatRange: the reported soft empty-item exit ──
+    // First line plain, the list rides soft lines; Shift+Enter put the
+    // caret after "2. " and the glyph pass isolated the marker leaves.
+    // The exit erases [23, 26): the marker dies (prefix removal, by
+    // design) AND the caret stays on the now-empty third line — an
+    // element point after the trailing break — never rolled back onto
+    // the previous item line's end. The erased husk leaves are gone.
+    {
+      selected = null
+      const para = makePara([
+        makeText('t1', 'plain text'),
+        makeBr('b1'),
+        makeText('t2', '1'),
+        makeText('t3', '. item one'),
+        makeBr('b2'),
+        makeText('t4', '2'),
+        makeText('t5', '. '),
+      ])
+      const block = blockOf(para)
+      eq(block.text, 'plain text\n1. item one\n2. ', 'fixture: the soft-lined list block')
+      const plan = I.computeEnterPlan([block.text], 0, 26)
+      eq(plan, { kind: 'list-exit-soft', prefix: '2. ', offset: 23 },
+        'the empty trailing item plans a soft exit')
+      consume(makeEditor(), block, plan.offset, plan.offset + plan.prefix.length)
+      const after = blockOf(para)
+      eq(after.text, 'plain text\n1. item one\n', 'the exit keeps the empty soft line (text)')
+      eq(after.leaves[after.leaves.length - 1].kind, 'br',
+        'the trailing break survives as the last leaf (no husk leaves after it)')
+      eq(selected, { key: 'p1', offset: 5, type: 'element' },
+        'the caret element-selects right after the trailing break — it STAYS on the emptied line, not the previous item\'s end')
+    }
+    // A partial erase (the atomic marker delete mid-block): the line
+    // head rule applies (a break ends at the range start) — the same
+    // position the surviving content's leaf start addresses.
+    {
+      selected = null
+      const para = makePara([
+        makeText('t1', 'a'),
+        makeBr('b1'),
+        makeText('t2', '1'),
+        makeText('t3', '. '),
+        makeText('t4', 'x'),
+      ])
+      const block = blockOf(para)
+      consume(makeEditor(), block, 2, 5)
+      eq(blockOf(para).text, 'a\nx', 'the marker chars die, the content stays')
+      eq(selected, { key: 'p1', offset: 2, type: 'element' },
+        'caret at the erased marker\'s line head (element point after the break — same position, line-head form)')
+    }
+    // ── the reported MID-PARAGRAPH empty-item exit ──
+    // "plain text\n1. a\n2. \n3. b" — the empty item rides BETWEEN
+    // lines (continuation inserted mid-list). The exit erases "2. "
+    // and the caret must stay on the emptied line BETWEEN the breaks —
+    // never clamped onto the next item's "3" leaf (v3.2).
+    {
+      selected = null
+      const para = makePara([
+        makeText('t1', 'plain text'),
+        makeBr('b1'),
+        makeText('t2', '1'),
+        makeText('t3', '. a'),
+        makeBr('b2'),
+        makeText('t4', '2'),
+        makeText('t5', '. '),
+        makeBr('b3'),
+        makeText('t6', '3'),
+        makeText('t7', '. b'),
+      ])
+      const block = blockOf(para)
+      const plan = I.computeEnterPlan([block.text], 0, 19)
+      eq(plan, { kind: 'list-exit-soft', prefix: '2. ', offset: 16 },
+        'the empty mid-paragraph item plans a soft exit')
+      consume(makeEditor(), block, plan.offset, plan.offset + plan.prefix.length)
+      const after = blockOf(para)
+      eq(after.text, 'plain text\n1. a\n\n3. b', 'the emptied line stays between its breaks')
+      eq(selected, { key: 'p1', offset: 5, type: 'element' },
+        'the caret element-selects BETWEEN the two breaks — it stays on the emptied line, not the next item\'s "3" leaf')
+    }
+    // The emptied item as the block's FIRST line: the exit leaves the
+    // block opening on a break; the caret takes the block head.
+    {
+      selected = null
+      const para = makePara([
+        makeText('t1', '1'),
+        makeText('t2', '. '),
+        makeBr('b1'),
+        makeText('t3', 'next'),
+      ])
+      const block = blockOf(para)
+      const plan = I.computeEnterPlan([block.text], 0, 3)
+      eq(plan, { kind: 'list-exit-soft', prefix: '1. ', offset: 0 },
+        'the empty item heading a soft-lined block plans a soft exit')
+      consume(makeEditor(), block, plan.offset, plan.offset + plan.prefix.length)
+      eq(blockOf(para).text, '\nnext', 'the emptied first line survives as a break')
+      eq(selected, { key: 'p1', offset: 0, type: 'element' },
+        'the caret element-selects the block head — the emptied FIRST line keeps the caret')
+    }
+    // ── Shift+Tab unlist of an empty item (the level ladder) ──
+    // Trailing: "a\n1. " unlists to "a\n"; the mapped caret (the line
+    // head) is the element point after the break.
+    {
+      selected = null
+      const para = makePara([
+        makeText('t1', 'a'),
+        makeBr('b1'),
+        makeText('t2', '1'),
+        makeText('t3', '. '),
+      ])
+      const blocks = [blockOf(para)]
+      I.applyLevelEdits(makeEditor(), blocks, {
+        kind: 'unlist',
+        edits: [{ index: 0, at: 2, remove: 3, insert: '' }],
+        caret: { index: 0, offset: 2 },
+      })
+      eq(blockOf(para).text, 'a\n', 'the empty top-level item unlists to an empty line')
+      eq(selected, { key: 'p1', offset: 2, type: 'element' },
+        'Shift+Tab unlist (trailing): the caret stays on the emptied line')
+    }
+    // Mid-paragraph: "1. a\n2. \n3. b" unlists the empty "2. " — the
+    // caret parks between the breaks, not on the next item's leaf.
+    {
+      selected = null
+      const para = makePara([
+        makeText('t1', '1'),
+        makeText('t2', '. a'),
+        makeBr('b1'),
+        makeText('t3', '2'),
+        makeText('t4', '. '),
+        makeBr('b2'),
+        makeText('t5', '3'),
+        makeText('t6', '. b'),
+      ])
+      const blocks = [blockOf(para)]
+      I.applyLevelEdits(makeEditor(), blocks, {
+        kind: 'unlist',
+        edits: [{ index: 0, at: 5, remove: 3, insert: '' }],
+        caret: { index: 0, offset: 5 },
+      })
+      eq(blockOf(para).text, '1. a\n\n3. b', 'the empty mid item unlists, the line stays')
+      eq(selected, { key: 'p1', offset: 3, type: 'element' },
+        'Shift+Tab unlist (mid): the caret stays between the breaks — on the emptied line')
+    }
+    // The whole-block reset (marker-only paragraph) still applies.
+    {
+      selected = null
+      const para = makePara([makeText('t1', '2'), makeText('t2', '. ')])
+      consume(makeEditor(), blockOf(para), 0, 3)
+      eq(para.getChildren().length, 0, 'a fully emptied block strips every leaf')
+      eq(selected, { key: 'p1', offset: 0, type: 'element' },
+        '...and element-selects its start (the pristine reset, unchanged)')
+    }
+  }
+
   console.log('· flatOffsetForKey + selectionCoveredRanges (stub nodes)')
   {
     const fof = I.flatOffsetForKey
