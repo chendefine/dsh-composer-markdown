@@ -735,7 +735,10 @@
               separator = null; // stale/foreign node: skip this boundary
             }
           } else {
-            return; // '\n' inside a chip's clipboard text: atomic, unsplittable
+            break; // '\n' inside a chip's clipboard text: atomic, unsplittable
+            // — skip ONLY this boundary (separator stays null and the
+            // guard below continues to the next offset); an early return
+            // here would abandon every remaining boundary of the block.
           }
           break;
         }

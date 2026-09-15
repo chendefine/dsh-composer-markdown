@@ -3230,7 +3230,10 @@ window.__ModuleLoader__.load({
               separator = null; // stale/foreign node: skip this boundary
             }
           } else {
-            return; // '\n' inside a chip's clipboard text: atomic, unsplittable
+            break; // '\n' inside a chip's clipboard text: atomic, unsplittable
+            // — skip ONLY this boundary (separator stays null and the
+            // guard below continues to the next offset); an early return
+            // here would abandon every remaining boundary of the block.
           }
           break;
         }
@@ -4366,8 +4369,21 @@ window.__ModuleLoader__.load({
                 ? null
                 : planMarkerNudge(visualModelOf(freshTexts), livePoint)),
               (node, plan) => {
-                if (plan.where === 'end' && typeof node.selectEnd === 'function') node.selectEnd();
-                else if (typeof node.selectStart === 'function') node.selectStart();
+                // Land a TEXT selection when the target line carries text:
+                // an element selection (selectStart/selectEnd) at a body
+                // edge leaves planFenceKey's ArrowUp/ArrowDown skips
+                // unmatched (caretPoint's atStart/atEnd are text-anchored),
+                // so the native arrow steps into the zero-height marker
+                // line and the next nudge bounces the caret right back —
+                // the box top/bottom becomes a trap the vertical arrows
+                // cannot leave. placeFlatCaret prefers a text anchor; its
+                // element-point fallbacks ('\n' line heads, empty lines)
+                // are exactly the blocks caretPoint already reads as
+                // atStart/atEnd, so the skip plans stay armed there too.
+                const len = typeof node.getTextContent === 'function'
+                  ? node.getTextContent().length
+                  : 0;
+                placeFlatCaret(node, plan.where === 'end' ? len : 0);
               },
             ),
           };

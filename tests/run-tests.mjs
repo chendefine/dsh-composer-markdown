@@ -14,7 +14,7 @@
  * Exit code 0 = all green.
  */
 
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const root = resolve(new URL('..', import.meta.url).pathname)
@@ -1778,15 +1778,27 @@ if (checkout === undefined || checkout === '') {
   ok(/border-radius:\s*12px/.test(codeBlock), 'R5: code-block radius still 12px')
 
   // Lexical dist: resolve through the dependency range in ui-conversation.
+  // The range may live under dependencies OR devDependencies (the host
+  // bundles lexical itself and moved the declaration to devDeps) — the
+  // version range is the contract, not the section it sits in. pnpm nests
+  // the package under .pnpm/lexical@<version>_*/, so scan that directory
+  // for the matching prefix; a plain node_modules layout stays as the
+  // final fallback. Without this the F2b/F3/F4/F13 assertions below were
+  // silently skipped in pnpm checkouts — a contract guard that never ran.
   const convPkg = JSON.parse(read('packages/client/ui-conversation/package.json'))
-  const lexicalRange = convPkg.dependencies?.lexical
-  ok(typeof lexicalRange === 'string', 'composer still depends on lexical')
-  const candidates = lexicalRange?.match(/\d+\.\d+\.\d+/) ?? []
-  const version = candidates[0]
-  const lexicalPaths = [
-    version ? join(checkout, 'node_modules/.pnpm', `lexical@${version}_typescript@6.0.3/node_modules/lexical/dist/Lexical.dev.js`) : '',
-    join(checkout, 'node_modules/lexical/dist/Lexical.dev.js'),
-  ].filter(Boolean)
+  const lexicalRange = convPkg.dependencies?.lexical ?? convPkg.devDependencies?.lexical
+  ok(typeof lexicalRange === 'string', 'composer still depends on lexical (deps or devDeps)')
+  const version = lexicalRange?.match(/\d+\.\d+\.\d+/)?.[0]
+  const lexicalPaths = []
+  const pnpmDir = join(checkout, 'node_modules/.pnpm')
+  if (version !== undefined && existsSync(pnpmDir)) {
+    for (const name of readdirSync(pnpmDir)) {
+      if (name.startsWith(`lexical@${version}`)) {
+        lexicalPaths.push(join(pnpmDir, name, 'node_modules/lexical/dist/Lexical.dev.js'))
+      }
+    }
+  }
+  lexicalPaths.push(join(checkout, 'node_modules/lexical/dist/Lexical.dev.js'))
   const lexicalPath = lexicalPaths.find((p) => existsSync(p))
   if (lexicalPath === undefined) {
     console.log('  (lexical dev bundle not found in checkout node_modules — skipping lexical assertions)')
