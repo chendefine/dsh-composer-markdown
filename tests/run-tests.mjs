@@ -1775,7 +1775,13 @@ if (checkout === undefined || checkout === '') {
   ok(codeBlock.includes('--dsw-alias-markdown-code-block'), 'R5: code-block background token still exists')
   ok(codeBlock.includes('--dsw-alias-markdown-code-block-banner'), 'R5: banner background token still exists')
   ok(codeBlock.includes('--dsw-font-markdown-code-block'), 'R5: code-block font token still exists')
-  ok(/border-radius:\s*12px/.test(codeBlock), 'R5: code-block radius still 12px')
+  // Since DSH 0.1.7's material unification the radius is tokenized
+  // (--dsw-radius-lg, 16px); before that it was a literal 12px. Our fence
+  // CSS mirrors the token with a 12px fallback, so either host form works.
+  ok(/--dsl-code-block-border-radius:\s*var\(--dsw-radius-lg\)|border-radius:\s*12px/.test(codeBlock),
+    'R5: code-block radius is var(--dsw-radius-lg) or the legacy 12px literal')
+  ok(clientSource.includes('var(--dsw-radius-lg, 12px)'),
+    'R5: fence CSS mirrors the host radius token (with 12px fallback)')
 
   // Lexical dist: resolve through the dependency range in ui-conversation.
   // The range may live under dependencies OR devDependencies (the host

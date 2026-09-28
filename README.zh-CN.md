@@ -61,7 +61,7 @@ DSH 的 composer 是一个 Lexical 纯文本编辑器，原生只提供「Enter 
 
 ### 前提
 
-- DSH `0.1.2-alpha.x`（composer 为 Lexical 纯文本编辑器 + `@lexical/plain-text`，lexical `0.49`）；
+- DSH `0.1.7-rc.x`（已对 0.1.7-rc.2 实测；composer 为 Lexical 纯文本编辑器 + `@lexical/plain-text`，lexical `0.49`）；
 - Node.js `^22.19.0 || >=24.0.0`（与 DSH 本体的支持窗口一致，包的 `engines` 字段与其对齐）；
 - 现代桌面浏览器（Chrome / Edge / Firefox / Safari）。
 
@@ -227,7 +227,7 @@ index.js         组合根：生命周期 + __internals 组装
 
 ## 兼容性
 
-- DSH `0.1.2-alpha.x`（composer 为 Lexical 纯文本编辑器 + `@lexical/plain-text`，lexical `0.49`）；
+- DSH `0.1.7-rc.x`（已对 0.1.7-rc.2 实测；composer 为 Lexical 纯文本编辑器 + `@lexical/plain-text`，lexical `0.49`）；
 - 现代桌面浏览器（Chrome / Edge / Firefox / Safari）；
 - 与其他 composer 插件共存：捕获阶段先到先得（见「与原生行为的共存」）。
 

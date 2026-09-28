@@ -133,7 +133,9 @@
       '  white-space: pre-wrap;',
       '}',
       `[data-composer-input] p.${FENCE_CLASS_OPEN} + p.${FENCE_CLASS_BODY} {`,
-      '  border-radius: 12px 12px 0 0;',
+      // Mirrors the host CodeBlock radius token: a 12px literal through DSH
+      // 0.1.6, var(--dsw-radius-lg)=16px since 0.1.7's material unification.
+      '  border-radius: var(--dsw-radius-lg, 12px) var(--dsw-radius-lg, 12px) 0 0;',
       '  padding-top: 15px;',
       '}',
       '/* a language id gets a clean band for the overlay badge */',
@@ -148,7 +150,7 @@
       '  padding: 0 16px 16px;',
       '  margin-bottom: 8px;',
       '  background: var(--dsw-alias-markdown-code-block, color-mix(in oklab, currentColor 5%, transparent));',
-      '  border-radius: 0 0 12px 12px;',
+      '  border-radius: 0 0 var(--dsw-radius-lg, 12px) var(--dsw-radius-lg, 12px);',
       '}',
     ].join('\n');
 

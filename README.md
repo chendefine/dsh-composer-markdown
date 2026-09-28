@@ -61,7 +61,7 @@ By domain:
 
 ### Prerequisites
 
-- DSH `0.1.2-alpha.x` (the composer is a Lexical plain-text editor + `@lexical/plain-text`, lexical `0.49`);
+- DSH `0.1.7-rc.x` (verified against 0.1.7-rc.2; the composer is a Lexical plain-text editor + `@lexical/plain-text`, lexical `0.49`);
 - Node.js `^22.19.0 || >=24.0.0` — the same window DSH itself requires; the package's `engines` field mirrors it;
 - a modern desktop browser (Chrome / Edge / Firefox / Safari).
 
@@ -242,7 +242,7 @@ Features are not individually plumbed pipelines — they are rows over one set o
 
 ## Compatibility
 
-- DSH `0.1.2-alpha.x` (composer = a Lexical plain-text editor + `@lexical/plain-text`, lexical `0.49`);
+- DSH `0.1.7-rc.x` (composer = a Lexical plain-text editor + `@lexical/plain-text`, lexical `0.49`);
 - modern desktop browsers (Chrome / Edge / Firefox / Safari);
 - coexisting with other composer plugins: capture-phase first-come-first-served (see "Coexistence with native behavior").
 
