@@ -1334,6 +1334,103 @@ if (I) {
     }
   }
 
+  console.log('· promoteSoftBoundaries (blank-line paste regression)')
+  {
+    // Lexical's splitText omits empty pieces: splitting at offset zero
+    // returns [newline, tail], not [empty, newline, tail]. Exercise the
+    // actual mutation with stubs rather than just the pure split planner.
+    class Node {
+      parent = null
+      getNextSibling() {
+        if (this.parent === null) return null
+        const siblings = this.parent.children
+        return siblings[siblings.indexOf(this) + 1] ?? null
+      }
+      remove() {
+        if (this.parent === null) return
+        const siblings = this.parent.children
+        siblings.splice(siblings.indexOf(this), 1)
+        this.parent = null
+      }
+    }
+    class Text extends Node {
+      __type = 'text'
+      constructor(text) { super(); this.__text = text }
+      getTextContent() { return this.__text }
+      splitText(...offsets) {
+        const cuts = [0, ...offsets.sort((a, b) => a - b), this.__text.length]
+        const pieces = cuts.slice(1).map((end, i) => this.__text.slice(cuts[i], end))
+          .filter((piece) => piece.length > 0).map((piece) => new Text(piece))
+        if (pieces.length === 1) return [this] // Lexical keeps the original leaf
+        const siblings = this.parent.children
+        const index = siblings.indexOf(this)
+        siblings.splice(index, 1, ...pieces)
+        for (const piece of pieces) piece.parent = this.parent
+        this.parent = null
+        return pieces
+      }
+    }
+    class Paragraph extends Node {
+      __type = 'paragraph'
+      children = []
+      getChildren() { return this.children }
+      append(child) {
+        child.remove()
+        this.children.push(child)
+        child.parent = this
+      }
+      insertAfter(node) {
+        const siblings = this.parent.children
+        siblings.splice(siblings.indexOf(this) + 1, 0, node)
+        node.parent = this.parent
+      }
+      getTextContent() { return this.children.map((child) => child.getTextContent()).join('') }
+    }
+    const editor = { _nodes: new Map([['paragraph', { klass: Paragraph }]]) }
+    for (const input of [
+      'alpha\n\nbeta',
+      'alpha \n\nbeta\n\nbetaaa\n\n',
+      '\nalpha\n\nbeta\n',
+      '#!/usr/bin/python3\n\nimport sys\n\n\tamount = 42\n\nprint(amount)',
+    ]) {
+      const rootNode = new Paragraph()
+      const open = new Paragraph()
+      const body = new Paragraph()
+      const close = new Paragraph()
+      rootNode.append(open)
+      rootNode.append(body)
+      rootNode.append(close)
+      open.append(new Text('```python'))
+      body.append(new Text(input))
+      close.append(new Text('```'))
+      const offsets = I.planSoftLineSplits(rootNode.children.map((p) => p.getTextContent()))[1]
+      eq(offsets.length, input.split('\n').length - 1,
+        'every pasted newline inside a committed fence is scheduled for promotion')
+      I.promoteSoftBoundaries(editor, body, offsets)
+      const contents = rootNode.children.map((p) => p.getTextContent())
+      eq(contents, ['```python', ...input.split('\n'), '```'],
+        `pasted blank lines become paragraphs without dropping content: ${JSON.stringify(input)}`)
+      eq(contents.slice(1, -1).join('\n'), input,
+        'the promoted clipboard text matches the entire pasted source')
+    }
+    // The newline may also start a separate text leaf, including a leaf
+    // consisting of only that newline (splitText then returns [this]).
+    const rootNode = new Paragraph()
+    const open = new Paragraph()
+    const body = new Paragraph()
+    const close = new Paragraph()
+    for (const paragraph of [open, body, close]) rootNode.append(paragraph)
+    open.append(new Text('```'))
+    body.append(new Text('alpha'))
+    body.append(new Text('\n'))
+    body.append(new Text('beta'))
+    close.append(new Text('```'))
+    const offsets = I.planSoftLineSplits(rootNode.children.map((p) => p.getTextContent()))[1]
+    I.promoteSoftBoundaries(editor, body, offsets)
+    eq(rootNode.children.map((p) => p.getTextContent()), ['```', 'alpha', 'beta', '```'],
+      'a newline occupying its own text leaf is removed, not retained or skipped')
+  }
+
   console.log('· flatOffsetForKey + selectionCoveredRanges (stub nodes)')
   {
     const fof = I.flatOffsetForKey
