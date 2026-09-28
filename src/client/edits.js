@@ -726,11 +726,12 @@
           if (leaf.kind === 'br') {
             separator = leaf.node;
           } else if (leaf.kind === 'text' && leaf.text.charCodeAt(seek) === 10) {
-            // Split the leaf around the newline: [before]['\n'][after];
-            // the middle part becomes the separator to drop.
+            // splitText omits empty pieces: when the newline starts this
+            // leaf, [before] is absent and the separator is parts[0].
+            // Removing parts[1] in that case would delete the pasted tail.
             try {
               const parts = leaf.node.splitText(seek, seek + 1);
-              separator = parts[1] ?? null;
+              separator = parts[seek === 0 ? 0 : 1] ?? null;
             } catch {
               separator = null; // stale/foreign node: skip this boundary
             }
